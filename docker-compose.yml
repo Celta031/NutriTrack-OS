@@ -1,0 +1,40 @@
+services:
+  nutritrack:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nutritrack-app
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      - DATABASE_URL=file:/var/lib/nutritrack/data/nutritrack.db
+      - UPLOAD_DIR=/var/lib/nutritrack/uploads
+    volumes:
+      - /var/lib/nutritrack/data:/var/lib/nutritrack/data
+      - /var/lib/nutritrack/uploads:/var/lib/nutritrack/uploads
+    expose:
+      - "3000"
+    mem_limit: 512m
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: nutritrack-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN_NAME=${DOMAIN_NAME:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - nutritrack
+    mem_limit: 128m
+
+volumes:
+  caddy_data:
+  caddy_config:

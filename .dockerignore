@@ -1,0 +1,8 @@
+node_modules
+.next
+.git
+dev.db
+dev.db-wal
+dev.db-shm
+uploads
+*.log

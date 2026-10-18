@@ -1,0 +1,4 @@
+{$DOMAIN_NAME:localhost} {
+    encode gzip zstd
+    reverse_proxy nutritrack:3000
+}

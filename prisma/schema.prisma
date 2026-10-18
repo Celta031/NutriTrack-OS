@@ -1,0 +1,98 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Ingredient {
+  id                String               @id @default(cuid())
+  name              String               @unique
+  category          String               // Proteínas, Laticínios, Mercearia, Frutas, Legumes/Verduras
+  unit              String               // g, ml, un, maço, etc.
+  purchaseFrequency String               // MONTHLY, BIWEEKLY, WEEKLY, DAILY
+  weeklyNeed        Float                @default(0)
+  monthlyNeed       Float                @default(0)
+  inStock           Boolean              @default(false) // Tenho em Casa / Comprado pro Mês
+  boughtForWeek     Boolean              @default(false) // Comprado pra Semana
+  notes             String?
+  updatedAt         DateTime             @updatedAt
+  mealIngredients   MealPlanIngredient[]
+}
+
+model MealPlanTemplate {
+  id            String               @id @default(cuid())
+  monthYear     String               // ex: "2026-10"
+  dayOfWeek     Int                  // 0=Dom a 6=Sáb
+  mealType      String               // BREAKFAST, MORNING_SNACK, LUNCH, AFTERNOON_SNACK, DINNER, SUPPER
+  scheduledTime String               // ex: "08:30"
+  title         String
+  description   String
+  isOptional    Boolean              @default(false)
+  ingredients   MealPlanIngredient[]
+  dailyLogs     DailyLog[]
+
+  @@index([monthYear, dayOfWeek])
+}
+
+model MealPlanIngredient {
+  id                 String           @id @default(cuid())
+  mealPlanTemplateId String
+  ingredientId       String
+  quantityNeeded     Float
+  mealPlanTemplate   MealPlanTemplate @relation(fields: [mealPlanTemplateId], references: [id], onDelete: Cascade)
+  ingredient         Ingredient       @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+
+  @@unique([mealPlanTemplateId, ingredientId])
+}
+
+model DailyLog {
+  id                 String            @id @default(cuid())
+  date               String            // YYYY-MM-DD
+  mealPlanTemplateId String?
+  mealType           String?           // Fallback / quick reference
+  status             String            @default("PENDING") // PENDING, COMPLETED, SUBSTITUTED, SKIPPED
+  actualNotes        String?
+  photoUrl           String?
+  loggedAt           DateTime          @default(now())
+  latitude           Float?
+  longitude          Float?
+  locationName       String?
+  waterIntakeMl      Int               @default(0)
+  fastingWaterDone   Boolean           @default(false)
+  mealPlanTemplate   MealPlanTemplate? @relation(fields: [mealPlanTemplateId], references: [id], onDelete: SetNull)
+
+  @@index([date])
+}
+
+model NotificationLog {
+  id           String   @id @default(cuid())
+  sentAt       DateTime @default(now())
+  targetDate   String   // YYYY-MM-DD (data do dia seguinte verificada)
+  recipient    String
+  subject      String
+  missingCount Int      @default(0)
+  missingItems String   // JSON array of missing items
+  status       String   // SENT, SIMULATED, FAILED
+  errorMessage String?
+}
+
+model AppConfig {
+  id               String   @id @default("singleton")
+  userName         String   @default("Demo User")
+  nutritionistName String   @default("Dra. Nutricionista")
+  targetEmail      String   @default("user@example.com")
+  smtpHost         String   @default("smtp.example.com")
+  smtpPort         Int      @default(587)
+  smtpUser         String   @default("")
+  smtpPass         String   @default("")
+  resendApiKey     String   @default("")
+  emailProvider    String   @default("SMTP") // SMTP or RESEND
+  dailyWaterGoalMl Int      @default(3000)
+  fastingWaterMl   Int      @default(500)
+  cronTime         String   @default("18:00")
+  cronEnabled      Boolean  @default(true)
+  updatedAt        DateTime @updatedAt
+}

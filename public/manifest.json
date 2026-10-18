@@ -1,0 +1,10 @@
+{
+  "name": "NutriTrack OS",
+  "short_name": "NutriTrack OS",
+  "description": "Sistema Inteligente de Gestão de Dieta, Estoque Vivo e Acompanhamento Nutricional",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#022c22",
+  "theme_color": "#059669",
+  "orientation": "portrait-primary"
+}
