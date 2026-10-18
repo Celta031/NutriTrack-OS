@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer";
 import { prisma } from "./prisma";
 import { ensureSeeded } from "./seed-data";
+import { syncWeeklyInventoryExpiration } from "./week-cycle";
 
 export interface MissingTomorrowItem {
   ingredientId: string;
@@ -61,6 +62,9 @@ export async function computeTomorrowMissing(
   const tomorrowDayName = DAY_NAMES[tomorrowDayOfWeek];
 
   await ensureSeeded(monthYear, userId);
+
+  // SPEC-09: Auto-expire boughtForWeek items if the ISO week has rolled over
+  await syncWeeklyInventoryExpiration(userId, base);
 
   const tomorrowTemplates = await prisma.mealPlanTemplate.findMany({
     where: {
@@ -147,10 +151,11 @@ export async function runLookaheadCheck(
     user?.name ||
     process.env.NEXT_PUBLIC_USER_NAME ||
     "Demo User";
+  const configuredTime = config?.alertTime || config?.cronTime || "18:00";
 
   const subject =
     missingItems.length > 0
-      ? `⚠️ [NutriTrack OS] Alerta: ${missingItems.length} ingrediente(s) faltando para amanhã (${tomorrowDayName})`
+      ? `⚠️ [NutriTrack OS] Alerta (${configuredTime}): ${missingItems.length} ingrediente(s) faltando para amanhã (${tomorrowDayName})`
       : `✅ [NutriTrack OS] Estoque 100% pronto para amanhã (${tomorrowDayName})`;
 
   const rowsHtml =
@@ -179,14 +184,14 @@ export async function runLookaheadCheck(
   const htmlPreview = `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 640px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;">
       <div style="background: linear-gradient(135deg, #065f46 0%, #10b981 100%); color: white; padding: 20px 24px;">
-        <h2 style="margin: 0; font-size: 20px;">NutriTrack OS • Lookahead Diário (18:00)</h2>
+        <h2 style="margin: 0; font-size: 20px;">NutriTrack OS • Lookahead Diário (${configuredTime})</h2>
         <p style="margin: 6px 0 0; opacity: 0.9; font-size: 14px;">
           Olá, <strong>${userName}</strong>! Verificação preventiva para <strong>${tomorrowDayName} (${tomorrowDate})</strong>.
         </p>
       </div>
       <div style="padding: 20px 24px;">
         <p style="margin-top: 0; color: #334155; font-size: 14px;">
-          Cruzamos as <strong>${tomorrowTemplates.length} refeições planejadas para amanhã</strong> com o seu estoque vivo (itens onde <em>"Tenho pro Mês"</em> e <em>"Comprado pra Semana"</em> estão desmarcados):
+          Cruzamos as <strong>${tomorrowTemplates.length} refeições planejadas para amanhã</strong> com o seu estoque vivo (itens onde <em>"Tenho pro Mês"</em> e <em>"Comprado p/ Semana"</em> estão desmarcados):
         </p>
         <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin: 16px 0;">
           <thead>
@@ -202,7 +207,7 @@ export async function runLookaheadCheck(
           </tbody>
         </table>
         <div style="background: #f0fdf4; border-left: 4px solid #10b981; padding: 12px 16px; border-radius: 6px; font-size: 13px; color: #065f46;">
-          <strong>Dica de Ação:</strong> Compre ou descongele os itens acima hoje à noite e marque <em>"Comprado pra Semana"</em> na aba <strong>Lista de Compras</strong> do NutriTrack OS para não furar a dieta amanhã!
+          <strong>Dica de Ação:</strong> Compre ou descongele os itens acima hoje à noite e marque <em>"Comprado p/ Semana"</em> na aba <strong>Lista de Compras</strong> do NutriTrack OS para não furar a dieta amanhã!
         </div>
       </div>
     </div>

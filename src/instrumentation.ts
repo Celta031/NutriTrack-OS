@@ -3,6 +3,9 @@ export async function register() {
     const cron = await import("node-cron");
     const { ensureSeeded } = await import("./lib/seed-data");
     const { runLookaheadCheck } = await import("./lib/lookahead-alert");
+    const { getSaoPauloNow, syncWeeklyInventoryExpiration } = await import(
+      "./lib/week-cycle"
+    );
     const { prisma } = await import("./lib/prisma");
 
     try {
@@ -12,13 +15,11 @@ export async function register() {
       console.error("[NutriTrack OS] Startup seed check error:", err);
     }
 
-    // Schedule daily lookahead check every minute, iterating over all registered users (SPEC-06)
+    // SPEC-10: Dynamic minute-by-minute Lookahead Alert Scheduler (America/Sao_Paulo timezone)
     cron.default.schedule("* * * * *", async () => {
       try {
-        const now = new Date();
-        const hh = String(now.getHours()).padStart(2, "0");
-        const mm = String(now.getMinutes()).padStart(2, "0");
-        const currentHHMM = `${hh}:${mm}`;
+        const { dateStr: currentYYYYMMDD, timeStr: currentHHmm } =
+          getSaoPauloNow();
 
         const users = await prisma.user.findMany({
           include: { appConfig: true },
@@ -26,12 +27,34 @@ export async function register() {
 
         for (const user of users) {
           const config = user.appConfig;
-          const targetTime = config?.cronTime || "18:00";
-          if (config?.cronEnabled !== false && currentHHMM === targetTime) {
+          if (!config) continue;
+
+          const isEnabled =
+            config.alertEnabled !== undefined
+              ? config.alertEnabled
+              : config.cronEnabled !== false;
+          const targetTime = config.alertTime || config.cronTime || "18:00";
+
+          if (
+            isEnabled &&
+            targetTime === currentHHmm &&
+            config.lastAlertRunDate !== currentYYYYMMDD
+          ) {
             console.log(
-              `[NutriTrack OS Cron] Firing ${targetTime} Lookahead Alert Check for user ${user.email}...`
+              `[NutriTrack OS Cron] Firing ${targetTime} (America/Sao_Paulo) Lookahead Check for ${user.email}...`
             );
-            await runLookaheadCheck(user.id);
+
+            await syncWeeklyInventoryExpiration(user.id);
+            const result = await runLookaheadCheck(user.id);
+
+            await prisma.appConfig.update({
+              where: { id: config.id },
+              data: { lastAlertRunDate: currentYYYYMMDD },
+            });
+
+            console.log(
+              `[NutriTrack OS Cron] Completed for ${user.email} (missingItems=${result.missingItems.length}, status=${result.status})`
+            );
           }
         }
       } catch (e) {

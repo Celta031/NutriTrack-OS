@@ -43,6 +43,7 @@ import {
   CartesianGrid,
 } from "recharts";
 import type { BaseRecipe } from "@/lib/recipes";
+import type { NutritionistMealOption } from "@/lib/nutritionist-catalog";
 
 interface IngredientItem {
   id: string;
@@ -54,6 +55,8 @@ interface IngredientItem {
   monthlyNeed: number;
   inStock: boolean;
   boughtForWeek: boolean;
+  boughtForWeekAt?: string | null;
+  weekCycleKey?: string | null;
   notes?: string;
   usedTomorrow: boolean;
   missingForTomorrow: boolean;
@@ -130,6 +133,17 @@ interface AppConfigData {
   fastingWaterMl: number;
   cronTime: string;
   cronEnabled: boolean;
+  alertTime?: string;
+  alertEnabled?: boolean;
+  lastAlertRunDate?: string | null;
+}
+
+interface WeekCycleInfo {
+  weekCycleKey: string;
+  mondayDate: string;
+  sundayDate: string;
+  label: string;
+  expiredResetCount?: number;
 }
 
 interface TomorrowSummary {
@@ -287,6 +301,11 @@ export default function NutriTrackApp() {
   const [ingredients, setIngredients] = useState<IngredientItem[]>([]);
   const [mealTemplates, setMealTemplates] = useState<MealPlanTemplateItem[]>([]);
   const [monthLogs, setMonthLogs] = useState<DailyLogItem[]>([]);
+  const [allUserLogs, setAllUserLogs] = useState<DailyLogItem[]>([]);
+  const [nutritionistCatalog, setNutritionistCatalog] = useState<
+    NutritionistMealOption[]
+  >([]);
+  const [weekCycle, setWeekCycle] = useState<WeekCycleInfo | null>(null);
   const [config, setConfig] = useState<AppConfigData | null>(null);
   const [notificationLogs, setNotificationLogs] = useState<NotificationLogItem[]>(
     []
@@ -295,7 +314,7 @@ export default function NutriTrackApp() {
   const [tomorrowSummary, setTomorrowSummary] =
     useState<TomorrowSummary | null>(null);
 
-  // Planner sub-state
+  // Planner sub-state (SPEC-08)
   const [selectedDayOfWeek, setSelectedDayOfWeek] = useState<number>(() =>
     new Date().getDay()
   );
@@ -308,6 +327,24 @@ export default function NutriTrackApp() {
   const [editMealIngredients, setEditMealIngredients] = useState<
     { ingredientId: string; quantityNeeded: number }[]
   >([]);
+  const [editTargetDays, setEditTargetDays] = useState<number[]>([]);
+  const [applyingCatalogMealId, setApplyingCatalogMealId] = useState<
+    string | null
+  >(null);
+  const [newIngName, setNewIngName] = useState("");
+  const [newIngCategory, setNewIngCategory] = useState("Mercearia");
+  const [newIngUnit, setNewIngUnit] = useState("g");
+  const [newIngQty, setNewIngQty] = useState<number>(50);
+  const [creatingCustomIng, setCreatingCustomIng] = useState(false);
+
+  // Report Date Range Filter state (SPEC-11)
+  const [reportStartDate, setReportStartDate] = useState<string>(
+    () => `${todayStr.slice(0, 7)}-01`
+  );
+  const [reportEndDate, setReportEndDate] = useState<string>(() => todayStr);
+  const [reportPreset, setReportPreset] = useState<
+    "WEEK" | "MONTH" | "LAST30" | "ALL" | "CUSTOM"
+  >("MONTH");
 
   // Shopping sub-state
   const [shoppingCategory, setShoppingCategory] = useState<string>("ALL");
@@ -365,6 +402,10 @@ export default function NutriTrackApp() {
         if (data.ingredients) setIngredients(data.ingredients);
         if (data.mealTemplates) setMealTemplates(data.mealTemplates);
         if (data.monthLogs) setMonthLogs(data.monthLogs);
+        if (data.allUserLogs) setAllUserLogs(data.allUserLogs);
+        if (data.nutritionistCatalog)
+          setNutritionistCatalog(data.nutritionistCatalog);
+        if (data.weekCycle) setWeekCycle(data.weekCycle);
         if (data.config) setConfig(data.config);
         if (data.notificationLogs) setNotificationLogs(data.notificationLogs);
         if (data.baseRecipes) setBaseRecipes(data.baseRecipes);
@@ -428,6 +469,7 @@ export default function NutriTrackApp() {
       setIngredients([]);
       setMealTemplates([]);
       setMonthLogs([]);
+      setAllUserLogs([]);
       setConfig(null);
       setNotificationLogs([]);
       setTomorrowSummary(null);
@@ -662,7 +704,43 @@ export default function NutriTrackApp() {
     }
   };
 
-  // Open Edit Meal Template modal in Planner
+  // SPEC-08: Apply an Official Nutritionist Option directly from the dropdown
+  const handleSelectCatalogOption = async (
+    meal: MealPlanTemplateItem,
+    catalogOptionId: string,
+    replicateAllWeek = false
+  ) => {
+    if (!catalogOptionId) return;
+    setApplyingCatalogMealId(meal.id);
+    try {
+      const res = await fetch("/api/meals", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: meal.id,
+          monthYear: selectedMonthYear,
+          catalogOptionId,
+          scheduledTime: meal.scheduledTime,
+          targetDays: replicateAllWeek
+            ? [1, 2, 3, 4, 5, 6, 0]
+            : [meal.dayOfWeek],
+        }),
+      });
+      if (!res.ok) throw new Error("Erro ao aplicar opção da nutricionista");
+      await fetchState();
+      showToast(
+        replicateAllWeek
+          ? "Opção oficial da Nutricionista aplicada para todos os dias da semana! Lista de compras recalculada."
+          : "Opção oficial da Nutricionista aplicada! Lista de compras recalculada."
+      );
+    } catch {
+      showToast("Erro ao aplicar opção do catálogo da nutricionista");
+    } finally {
+      setApplyingCatalogMealId(null);
+    }
+  };
+
+  // Open Edit / Customize Meal Template modal in Planner (SPEC-08)
   const openEditMealModal = (meal: MealPlanTemplateItem) => {
     setEditingMeal(meal);
     setEditMealTitle(meal.title);
@@ -674,11 +752,62 @@ export default function NutriTrackApp() {
         quantityNeeded: link.quantityNeeded,
       }))
     );
+    setEditTargetDays([meal.dayOfWeek]);
+    setNewIngName("");
+    setNewIngCategory("Mercearia");
+    setNewIngUnit("g");
+    setNewIngQty(50);
+  };
+
+  // Create a brand-new custom ingredient inline inside the Meal Customize Modal
+  const handleCreateCustomIngredientInModal = async () => {
+    if (!newIngName.trim()) {
+      showToast("Informe o nome do novo ingrediente.");
+      return;
+    }
+    setCreatingCustomIng(true);
+    try {
+      const res = await fetch("/api/ingredients", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newIngName.trim(),
+          category: newIngCategory,
+          unit: newIngUnit,
+          purchaseFrequency: "WEEKLY",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ingredient) {
+        throw new Error(data.error || "Erro ao criar ingrediente");
+      }
+      const created: IngredientItem = {
+        ...data.ingredient,
+        usedTomorrow: false,
+        tomorrowQuantity: 0,
+        missingForTomorrow: false,
+      };
+      setIngredients((prev) => [...prev, created]);
+      setEditMealIngredients((prev) => [
+        ...prev,
+        { ingredientId: created.id, quantityNeeded: Number(newIngQty) || 50 },
+      ]);
+      setNewIngName("");
+      showToast(
+        `Ingrediente "${created.name}" adicionado ao catálogo e vinculado ao prato!`
+      );
+    } catch {
+      showToast("Erro ao criar ingrediente customizado");
+    } finally {
+      setCreatingCustomIng(false);
+    }
   };
 
   const handleSaveMealTemplate = async () => {
     if (!editingMeal) return;
     try {
+      const targetDaysToSave =
+        editTargetDays.length > 0 ? editTargetDays : [editingMeal.dayOfWeek];
       const res = await fetch("/api/meals", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -689,13 +818,16 @@ export default function NutriTrackApp() {
           scheduledTime: editMealTime,
           description: editMealDesc,
           ingredients: editMealIngredients,
+          targetDays: targetDaysToSave,
         }),
       });
       if (!res.ok) throw new Error("Erro ao salvar prato");
       setEditingMeal(null);
       await fetchState();
       showToast(
-        "Prato atualizado! Quantidades semanais e mensais recalculadas na Lista de Compras."
+        targetDaysToSave.length > 1
+          ? `Prato atualizado e replicado para ${targetDaysToSave.length} dias da semana! Lista de compras recalculada.`
+          : "Prato atualizado! Quantidades semanais e mensais recalculadas na Lista de Compras."
       );
     } catch {
       showToast("Erro ao atualizar prato do cardápio");
@@ -724,26 +856,100 @@ export default function NutriTrackApp() {
     }
   };
 
-  // Save AppConfig
+  // Save AppConfig (SPEC-10 dynamic alertTime + alertEnabled)
   const handleSaveConfig = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!config) return;
     setSavingConfig(true);
     try {
+      const syncedTime = config.alertTime || config.cronTime || "18:00";
+      const syncedEnabled =
+        config.alertEnabled !== undefined
+          ? config.alertEnabled
+          : config.cronEnabled;
       const res = await fetch("/api/config", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(config),
+        body: JSON.stringify({
+          ...config,
+          alertTime: syncedTime,
+          cronTime: syncedTime,
+          alertEnabled: syncedEnabled,
+          cronEnabled: syncedEnabled,
+        }),
       });
       if (!res.ok) throw new Error("Falha ao salvar");
       await fetchState();
-      showToast("Configurações de E-mail e Metas salvas com sucesso!");
+      showToast(
+        `Configurações salvas! Alerta diário agendado para ${syncedTime}.`
+      );
     } catch {
       showToast("Erro ao salvar configurações");
     } finally {
       setSavingConfig(false);
     }
   };
+
+  // SPEC-11: Apply Quick Date Range Presets in Nutritionist Report
+  const handleApplyReportPreset = useCallback(
+    (preset: "WEEK" | "MONTH" | "LAST30" | "ALL") => {
+      setReportPreset(preset);
+      if (preset === "WEEK") {
+        if (weekCycle) {
+          setReportStartDate(weekCycle.mondayDate);
+          setReportEndDate(weekCycle.sundayDate);
+        } else {
+          const d = new Date(`${selectedDate}T12:00:00`);
+          const day = d.getDay();
+          const diffToMonday = day === 0 ? -6 : 1 - day;
+          const mon = new Date(d);
+          mon.setDate(d.getDate() + diffToMonday);
+          const sun = new Date(mon);
+          sun.setDate(mon.getDate() + 6);
+          const fmt = (dt: Date) =>
+            `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(
+              2,
+              "0"
+            )}-${String(dt.getDate()).padStart(2, "0")}`;
+          setReportStartDate(fmt(mon));
+          setReportEndDate(fmt(sun));
+        }
+      } else if (preset === "MONTH") {
+        const [y, m] = selectedMonthYear.split("-").map(Number);
+        const lastDay = new Date(y, m, 0).getDate();
+        setReportStartDate(`${selectedMonthYear}-01`);
+        setReportEndDate(
+          `${selectedMonthYear}-${String(lastDay).padStart(2, "0")}`
+        );
+      } else if (preset === "LAST30") {
+        const end = new Date(`${todayStr}T12:00:00`);
+        const start = new Date(end);
+        start.setDate(end.getDate() - 29);
+        const fmt = (dt: Date) =>
+          `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(
+            2,
+            "0"
+          )}-${String(dt.getDate()).padStart(2, "0")}`;
+        setReportStartDate(fmt(start));
+        setReportEndDate(todayStr);
+      } else if (preset === "ALL") {
+        const sourceLogs = allUserLogs.length > 0 ? allUserLogs : monthLogs;
+        if (sourceLogs.length > 0) {
+          const dates = sourceLogs.map((l) => l.date).sort();
+          setReportStartDate(dates[0]);
+          setReportEndDate(
+            dates[dates.length - 1] > todayStr
+              ? dates[dates.length - 1]
+              : todayStr
+          );
+        } else {
+          setReportStartDate(`${selectedMonthYear}-01`);
+          setReportEndDate(todayStr);
+        }
+      }
+    },
+    [weekCycle, selectedDate, selectedMonthYear, todayStr, allUserLogs, monthLogs]
+  );
 
   // Monthly Calendar computation
   const calendarDays = useMemo(() => {
@@ -805,9 +1011,14 @@ export default function NutriTrackApp() {
     return { firstDayDow, days: result };
   }, [selectedMonthYear, monthLogs]);
 
-  // Executive Report KPIs
+  // Executive Report KPIs filtered by [reportStartDate, reportEndDate] (SPEC-11)
   const reportStats = useMemo(() => {
-    const mealLogs = monthLogs.filter((l) => l.mealPlanTemplateId);
+    const sourceLogs = allUserLogs.length > 0 ? allUserLogs : monthLogs;
+    const filteredLogs = sourceLogs.filter(
+      (l) => l.date >= reportStartDate && l.date <= reportEndDate
+    );
+
+    const mealLogs = filteredLogs.filter((l) => l.mealPlanTemplateId);
     const totalLogged = mealLogs.length;
     const completed = mealLogs.filter((l) => l.status === "COMPLETED").length;
     const substituted = mealLogs.filter(
@@ -818,9 +1029,39 @@ export default function NutriTrackApp() {
     const adherencePct =
       totalLogged > 0
         ? Math.round(((completed + substituted * 0.85) / totalLogged) * 100)
-        : 100;
+        : 0;
 
-    const daysWithWater = calendarDays.days.filter((d) => d.waterMl > 0);
+    // Group by date for water average and daily chart
+    const dateMap = new Map<
+      string,
+      {
+        completedCount: number;
+        substitutedCount: number;
+        skippedCount: number;
+        waterMl: number;
+      }
+    >();
+    for (const log of filteredLogs) {
+      const entry = dateMap.get(log.date) || {
+        completedCount: 0,
+        substitutedCount: 0,
+        skippedCount: 0,
+        waterMl: 0,
+      };
+      if ((log.waterIntakeMl || 0) > entry.waterMl) {
+        entry.waterMl = log.waterIntakeMl || 0;
+      }
+      if (log.mealPlanTemplateId) {
+        if (log.status === "COMPLETED") entry.completedCount++;
+        else if (log.status === "SUBSTITUTED") entry.substitutedCount++;
+        else if (log.status === "SKIPPED") entry.skippedCount++;
+      }
+      dateMap.set(log.date, entry);
+    }
+
+    const daysWithWater = Array.from(dateMap.values()).filter(
+      (d) => d.waterMl > 0
+    );
     const avgWaterMl =
       daysWithWater.length > 0
         ? Math.round(
@@ -829,19 +1070,49 @@ export default function NutriTrackApp() {
           )
         : 0;
 
-    const chartData = calendarDays.days
+    const chartData = Array.from(dateMap.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
       .filter(
-        (d) =>
+        ([, d]) =>
           d.completedCount + d.substitutedCount + d.skippedCount > 0 ||
           d.waterMl > 0
       )
-      .map((d) => ({
-        dia: d.dateStr.slice(8, 10),
+      .map(([dateStr, d]) => ({
+        dia: `${dateStr.slice(8, 10)}/${dateStr.slice(5, 7)}`,
         Concluidas: d.completedCount,
         Substituidas: d.substitutedCount,
         Puladas: d.skippedCount,
         AguaLitros: Number((d.waterMl / 1000).toFixed(2)),
       }));
+
+    // Breakdown by mealType (SPEC-11)
+    const adherenceByMealType = Object.entries(MEAL_TYPE_META)
+      .sort(([, a], [, b]) => a.order - b.order)
+      .map(([mealType, meta]) => {
+        const typeLogs = mealLogs.filter((l) => l.mealType === mealType);
+        const tTotal = typeLogs.length;
+        const tComp = typeLogs.filter((l) => l.status === "COMPLETED").length;
+        const tSub = typeLogs.filter((l) => l.status === "SUBSTITUTED").length;
+        const tSkip = typeLogs.filter((l) => l.status === "SKIPPED").length;
+        const tPct =
+          tTotal > 0 ? Math.round(((tComp + tSub * 0.85) / tTotal) * 100) : 0;
+        return {
+          mealType,
+          label: meta.label,
+          badgeColor: meta.badgeColor,
+          total: tTotal,
+          completed: tComp,
+          substituted: tSub,
+          skipped: tSkip,
+          pct: tPct,
+        };
+      });
+
+    const formatPtBrDate = (iso: string) => {
+      if (!iso || iso.length < 10) return iso;
+      const [y, m, d] = iso.slice(0, 10).split("-");
+      return `${d}/${m}/${y}`;
+    };
 
     return {
       totalLogged,
@@ -851,10 +1122,16 @@ export default function NutriTrackApp() {
       adherencePct,
       avgWaterMl,
       chartData,
-      substitutionsList: mealLogs.filter((l) => l.status === "SUBSTITUTED"),
+      adherenceByMealType,
+      periodLabel: `${formatPtBrDate(reportStartDate)} até ${formatPtBrDate(
+        reportEndDate
+      )}`,
+      substitutionsList: mealLogs.filter(
+        (l) => l.status === "SUBSTITUTED" || l.status === "SKIPPED"
+      ),
       photosList: mealLogs.filter((l) => Boolean(l.photoUrl)),
     };
-  }, [monthLogs, calendarDays]);
+  }, [allUserLogs, monthLogs, reportStartDate, reportEndDate]);
 
   // Filtered shopping list
   const filteredIngredients = useMemo(() => {
@@ -1124,7 +1401,13 @@ export default function NutriTrackApp() {
                 label: `Compras (${ingredients.length})`,
                 icon: ShoppingCart,
               },
-              { id: "alerts", label: "Alertas 18h", icon: Bell },
+              {
+                id: "alerts",
+                label: `Alertas (${
+                  config?.alertTime || config?.cronTime || "18:00"
+                })`,
+                icon: Bell,
+              },
               { id: "report", label: "Relatório Nutri", icon: FileText },
             ].map((tab) => {
               const Icon = tab.icon;
@@ -1340,7 +1623,7 @@ export default function NutriTrackApp() {
                   <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col justify-between">
                     <div>
                       <span className="text-xs font-bold uppercase tracking-wider text-emerald-700">
-                        Resumo do Mês ({selectedMonthYear})
+                        Resumo do Período ({reportStats.periodLabel})
                       </span>
                       <h3 className="text-2xl font-extrabold text-slate-900 mt-1">
                         {reportStats.adherencePct}% de Adesão
@@ -1673,12 +1956,17 @@ export default function NutriTrackApp() {
                             {tomorrowSummary.tomorrowDayName})
                           </h3>
                           <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-medium">
-                            Cron 18:00 Ativo
+                            Cron {config?.alertTime || config?.cronTime || "18:00"}{" "}
+                            {config?.alertEnabled === false ? "Pausado" : "Ativo"}
                           </span>
                         </div>
                         <p className="text-xs text-slate-500 mt-1">
-                          Verifica automaticamente às 18:00 se algum ingrediente
-                          das {tomorrowSummary.totalMealsTomorrow} refeições de
+                          Verifica automaticamente às{" "}
+                          <strong>
+                            {config?.alertTime || config?.cronTime || "18:00"}
+                          </strong>{" "}
+                          se algum ingrediente das{" "}
+                          {tomorrowSummary.totalMealsTomorrow} refeições de
                           amanhã está desmarcado.
                         </p>
 
@@ -1714,7 +2002,7 @@ export default function NutriTrackApp() {
             )}
 
             {/* =====================================================================
-                TAB 2: MONTAGEM MENSAL DINÂMICA & GUIA DE RECEITAS BASE
+                TAB 2: MONTAGEM MENSAL DINÂMICA & GUIA DE RECEITAS BASE (SPEC-08)
                ===================================================================== */}
             {activeTab === "planner" && (
               <div className="space-y-8">
@@ -1725,9 +2013,14 @@ export default function NutriTrackApp() {
                         Montagem Mensal Dinâmica (Ciclo Semanal Seg a Dom)
                       </h2>
                       <p className="text-xs text-slate-500">
-                        Altere qualquer refeição ou quantidade do ciclo do mês{" "}
-                        <strong>{selectedMonthYear}</strong> — a Lista de Compras
-                        recalcula automaticamente as metas semanais e mensais!
+                        Selecione qualquer uma das{" "}
+                        <strong>
+                          {nutritionistCatalog.length || 48} opções oficiais do
+                          PDF da Nutricionista
+                        </strong>{" "}
+                        ou clique em{" "}
+                        <strong>&ldquo;✨ Personalizar / Criar Prato&rdquo;</strong>{" "}
+                        — a Lista de Compras recalcula automaticamente!
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
@@ -1782,13 +2075,18 @@ export default function NutriTrackApp() {
                           label: meal.mealType,
                           badgeColor: "bg-slate-100 text-slate-800",
                         };
+                        const optionsForType = nutritionistCatalog.filter(
+                          (opt) => opt.mealType === meal.mealType
+                        );
+                        const isApplying = applyingCatalogMealId === meal.id;
+
                         return (
                           <div
                             key={meal.id}
-                            className="rounded-xl border border-slate-200 p-4 flex flex-col justify-between hover:border-emerald-300 transition-colors"
+                            className="rounded-xl border border-slate-200 p-4 flex flex-col justify-between hover:border-emerald-300 transition-colors bg-white shadow-sm"
                           >
                             <div>
-                              <div className="flex items-center justify-between gap-2">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
                                 <div className="flex items-center gap-2">
                                   <span className="text-xs font-bold bg-slate-900 text-white px-2 py-0.5 rounded">
                                     {meal.scheduledTime}
@@ -1801,12 +2099,53 @@ export default function NutriTrackApp() {
                                 </div>
                                 <button
                                   onClick={() => openEditMealModal(meal)}
-                                  className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:text-emerald-900 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200"
+                                  className="inline-flex items-center gap-1 text-xs font-bold text-emerald-800 hover:text-emerald-950 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1 rounded-lg border border-emerald-300 transition-colors"
                                 >
-                                  <Edit3 className="w-3.5 h-3.5" /> Editar Prato
+                                  <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                                  ✨ Personalizar / Criar Prato
                                 </button>
                               </div>
-                              <h4 className="font-bold text-slate-900 mt-2 text-sm">
+
+                              {/* SPEC-08: Official Nutritionist PDF Options Dropdown */}
+                              {optionsForType.length > 0 && (
+                                <div className="mt-3 p-2.5 rounded-xl bg-emerald-50/70 border border-emerald-200/80 space-y-1.5">
+                                  <label className="block text-[11px] font-bold text-emerald-900">
+                                    📋 Escolher Opção Oficial da Nutricionista (
+                                    {optionsForType.length} opções do PDF):
+                                  </label>
+                                  <div className="flex items-center gap-1.5">
+                                    <select
+                                      disabled={isApplying}
+                                      value={
+                                        optionsForType.find(
+                                          (o) => o.title === meal.title
+                                        )?.id || ""
+                                      }
+                                      onChange={(e) => {
+                                        if (e.target.value) {
+                                          handleSelectCatalogOption(
+                                            meal,
+                                            e.target.value,
+                                            false
+                                          );
+                                        }
+                                      }}
+                                      className="w-full text-xs border border-emerald-300 rounded-lg px-2.5 py-1.5 bg-white text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                                    >
+                                      <option value="">
+                                        -- Trocar por outra opção da Nutricionista ({meta.label}) --
+                                      </option>
+                                      {optionsForType.map((opt) => (
+                                        <option key={opt.id} value={opt.id}>
+                                          {opt.title}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                </div>
+                              )}
+
+                              <h4 className="font-bold text-slate-900 mt-2.5 text-sm">
                                 {meal.title}
                               </h4>
                               <p className="text-xs text-slate-600 mt-1">
@@ -1834,17 +2173,19 @@ export default function NutriTrackApp() {
                   </div>
                 </div>
 
-                {/* Built-in Base Recipes Guide */}
+                {/* Built-in Base Recipes Guide (8 Official Recipes from PDF Page 13) */}
                 <div className="space-y-4">
                   <div className="flex items-center gap-2">
                     <ChefHat className="w-6 h-6 text-emerald-700" />
                     <div>
                       <h3 className="text-lg font-bold text-slate-900">
-                        Guia de Receitas Base do Cardápio (Embutido)
+                        Guia de Receitas Base do Cardápio ({baseRecipes.length}{" "}
+                        Receitas Oficiais do PDF)
                       </h3>
                       <p className="text-xs text-slate-500">
-                        Preparações oficiais do plano alimentar padrão para
-                        otimizar a marmita semanal e substituições
+                        Preparações oficiais da página 13 do plano alimentar da
+                        nutricionista para otimizar a marmita semanal e
+                        substituições
                       </p>
                     </div>
                   </div>
@@ -1908,10 +2249,54 @@ export default function NutriTrackApp() {
             )}
 
             {/* =====================================================================
-                TAB 3: LISTA DE COMPRAS INTELIGENTE (MENSAL & SEMANAL - 39 ITENS)
+                TAB 3: LISTA DE COMPRAS INTELIGENTE & CICLO SEMANAL (SPEC-09)
                ===================================================================== */}
             {activeTab === "shopping" && (
               <div className="space-y-6">
+                {/* SPEC-09: Weekly Cycle Automatic Expiration Banner */}
+                <div className="bg-gradient-to-r from-sky-900 via-sky-800 to-emerald-900 text-white rounded-2xl p-4 shadow-sm flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-sky-400/20 border border-sky-300/30 flex items-center justify-center shrink-0">
+                      <CalendarIcon className="w-5 h-5 text-sky-200" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-extrabold uppercase tracking-wider text-sky-200">
+                          Ciclo Semanal de Compras Ativo
+                        </span>
+                        {weekCycle && (
+                          <span className="text-[11px] font-bold bg-emerald-400 text-emerald-950 px-2.5 py-0.5 rounded-full">
+                            {weekCycle.weekCycleKey} • {weekCycle.label}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-sky-100 mt-1">
+                        Itens marcados em{" "}
+                        <strong>[✓] Comprado p/ Semana</strong> valem apenas para
+                        a semana corrente (Seg a Dom) e{" "}
+                        <strong>expiram automaticamente na segunda-feira às 00:00</strong>
+                        , voltando a alertar para as refeições de D+1.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      await fetch("/api/ingredients", {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ action: "RESET_WEEK" }),
+                      });
+                      await fetchState();
+                      showToast(
+                        "Nova semana iniciada! Todos os checkboxes 'Comprado p/ Semana' foram desmarcados."
+                      );
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-white/15 hover:bg-white/25 border border-white/30 text-white text-xs font-bold transition-colors shrink-0"
+                  >
+                    🔄 Iniciar Nova Semana Manualmente
+                  </button>
+                </div>
+
                 {/* Summary KPIs */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
@@ -1946,7 +2331,7 @@ export default function NutriTrackApp() {
                       {ingredients.length}
                     </div>
                     <span className="text-[11px] text-slate-500">
-                      Abastecimento semanal
+                      Ciclo {weekCycle?.weekCycleKey || "Semanal"}
                     </span>
                   </div>
                   <div className="bg-rose-50 rounded-2xl p-4 border border-rose-200 shadow-sm">
@@ -1984,28 +2369,11 @@ export default function NutriTrackApp() {
                               : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                           }`}
                         >
-                          {cat === "ALL" ? "Todas Categorias (39)" : cat}
+                          {cat === "ALL"
+                            ? `Todas Categorias (${ingredients.length})`
+                            : cat}
                         </button>
                       ))}
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        onClick={async () => {
-                          await fetch("/api/ingredients", {
-                            method: "PATCH",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ action: "RESET_WEEK" }),
-                          });
-                          await fetchState();
-                          showToast(
-                            "Checkboxes 'Comprado pra Semana' reiniciados para novo ciclo semanal!"
-                          );
-                        }}
-                        className="px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-100 text-xs font-semibold text-slate-700"
-                      >
-                        Reiniciar Semana
-                      </button>
                     </div>
                   </div>
 
@@ -2031,7 +2399,7 @@ export default function NutriTrackApp() {
                           }
                           className="rounded text-rose-600"
                         />
-                        🚨 Apenas "Falta para Amanhã!"
+                        🚨 Apenas &ldquo;Falta para Amanhã!&rdquo;
                       </label>
 
                       <label className="inline-flex items-center gap-2 cursor-pointer font-semibold text-slate-700 bg-slate-100 px-3 py-1.5 rounded-xl">
@@ -2140,19 +2508,26 @@ export default function NutriTrackApp() {
                                 </label>
                               </td>
                               <td className="py-3 px-4 text-center bg-sky-50/30">
-                                <label className="inline-flex items-center justify-center cursor-pointer">
-                                  <input
-                                    type="checkbox"
-                                    checked={ing.boughtForWeek}
-                                    onChange={() =>
-                                      handleToggleIngredient(
-                                        ing,
-                                        "boughtForWeek"
-                                      )
-                                    }
-                                    className="w-5 h-5 rounded border-slate-300 text-sky-600 focus:ring-sky-500 cursor-pointer"
-                                  />
-                                </label>
+                                <div className="flex flex-col items-center justify-center gap-0.5">
+                                  <label className="inline-flex items-center justify-center cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={ing.boughtForWeek}
+                                      onChange={() =>
+                                        handleToggleIngredient(
+                                          ing,
+                                          "boughtForWeek"
+                                        )
+                                      }
+                                      className="w-5 h-5 rounded border-slate-300 text-sky-600 focus:ring-sky-500 cursor-pointer"
+                                    />
+                                  </label>
+                                  {ing.boughtForWeek && ing.weekCycleKey && (
+                                    <span className="text-[9px] font-bold text-sky-800 bg-sky-100 px-1.5 py-0.2 rounded">
+                                      {ing.weekCycleKey}
+                                    </span>
+                                  )}
+                                </div>
                               </td>
                             </tr>
                           );
@@ -2165,7 +2540,7 @@ export default function NutriTrackApp() {
             )}
 
             {/* =====================================================================
-                TAB 4: MOTOR DE ALERTA POR E-MAIL (LOOKAHEAD CRON 18:00) & CONFIG
+                TAB 4: MOTOR DE ALERTA POR E-MAIL (HORÁRIO DINÂMICO SPEC-10) & CONFIG
                ===================================================================== */}
             {activeTab === "alerts" && (
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -2175,16 +2550,25 @@ export default function NutriTrackApp() {
                     <div className="flex flex-wrap items-start justify-between gap-4">
                       <div>
                         <span className="text-xs font-bold uppercase tracking-wider text-emerald-700">
-                          Lookahead Cron Diário ({config?.cronTime || "18:00"})
+                          Lookahead Cron Diário (
+                          {config?.alertTime || config?.cronTime || "18:00"}) •{" "}
+                          {config?.alertEnabled === false
+                            ? "Pausado"
+                            : "Ativo"}
                         </span>
                         <h2 className="text-lg font-bold text-slate-900 mt-0.5">
                           Motor Inteligente de Alerta Preventivo por E-mail
                         </h2>
                         <p className="text-xs text-slate-600 mt-1">
-                          Cruza automaticamente as refeições do dia seguinte (
+                          Dispara automaticamente às{" "}
+                          <strong>
+                            {config?.alertTime || config?.cronTime || "18:00"}
+                          </strong>{" "}
+                          cruzando as refeições do dia seguinte (
                           <strong>{tomorrowSummary?.tomorrowDayName}</strong>) com
                           os ingredientes onde{" "}
-                          <code>inStock == false && boughtForWeek == false</code>.
+                          <code>inStock == false && boughtForWeek == false</code>{" "}
+                          (ou expirados na virada da semana).
                         </p>
                       </div>
 
@@ -2230,8 +2614,8 @@ export default function NutriTrackApp() {
                     {notificationLogs.length === 0 ? (
                       <p className="text-xs text-slate-500 py-4">
                         Nenhum alerta disparado ainda. Clique em{" "}
-                        <strong>"Testar Verificação e E-mail Agora"</strong> acima
-                        para testar!
+                        <strong>&ldquo;Testar Verificação e E-mail Agora&rdquo;</strong>{" "}
+                        acima para testar!
                       </p>
                     ) : (
                       <div className="space-y-2.5">
@@ -2284,10 +2668,10 @@ export default function NutriTrackApp() {
                         <Settings className="w-5 h-5 text-emerald-600" />
                         <div>
                           <h3 className="text-base font-bold text-slate-900">
-                            Configurações de E-mail (SMTP / Resend) & Metas
+                            Configurações de Alerta, E-mail & Metas
                           </h3>
                           <p className="text-xs text-slate-500">
-                            Configure diretamente pela interface web
+                            Personalize o horário do seu alerta diário e credenciais
                           </p>
                         </div>
                       </div>
@@ -2328,18 +2712,51 @@ export default function NutriTrackApp() {
 
                         <div>
                           <label className="block text-xs font-bold text-slate-700 mb-1">
-                            Horário do Cron Diário
+                            Horário do Alerta Diário (HH:mm)
                           </label>
                           <input
                             type="time"
-                            value={config.cronTime}
+                            value={config.alertTime || config.cronTime || "18:00"}
                             onChange={(e) =>
-                              setConfig({ ...config, cronTime: e.target.value })
+                              setConfig({
+                                ...config,
+                                alertTime: e.target.value,
+                                cronTime: e.target.value,
+                              })
                             }
-                            className="w-full text-xs border border-slate-300 rounded-xl px-3 py-2"
+                            className="w-full text-xs border border-slate-300 rounded-xl px-3 py-2 font-bold text-emerald-900"
                           />
                         </div>
                       </div>
+
+                      {/* SPEC-10: Toggle Alert Enabled */}
+                      <label className="flex items-center gap-2.5 p-3 rounded-xl bg-emerald-50/70 border border-emerald-200 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={
+                            config.alertEnabled !== undefined
+                              ? config.alertEnabled
+                              : config.cronEnabled
+                          }
+                          onChange={(e) =>
+                            setConfig({
+                              ...config,
+                              alertEnabled: e.target.checked,
+                              cronEnabled: e.target.checked,
+                            })
+                          }
+                          className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500"
+                        />
+                        <div className="text-xs">
+                          <span className="font-bold text-emerald-950 block">
+                            Ativar Disparo Automático Diário às{" "}
+                            {config.alertTime || config.cronTime || "18:00"}
+                          </span>
+                          <span className="text-[11px] text-emerald-800">
+                            Envia no máximo 1 alerta por dia caso faltem itens para D+1
+                          </span>
+                        </div>
+                      </label>
 
                       {config.emailProvider === "SMTP" ? (
                         <div className="space-y-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
@@ -2484,10 +2901,77 @@ export default function NutriTrackApp() {
             )}
 
             {/* =====================================================================
-                TAB 5: RELATÓRIO EXECUTIVO PARA A NUTRICIONISTA
+                TAB 5: RELATÓRIO EXECUTIVO PARA A NUTRICIONISTA (SPEC-11)
                ===================================================================== */}
             {activeTab === "report" && (
               <div className="space-y-6">
+                {/* SPEC-11: Date Range Filter Bar (hidden on print) */}
+                <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm no-print flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex items-center gap-1.5">
+                      <Filter className="w-4 h-4 text-emerald-700" />
+                      <span className="text-xs font-bold text-slate-800">
+                        Filtrar Período do Relatório:
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-slate-600 font-medium">
+                        De:
+                      </label>
+                      <input
+                        type="date"
+                        value={reportStartDate}
+                        onChange={(e) => {
+                          setReportStartDate(e.target.value);
+                          setReportPreset("CUSTOM");
+                        }}
+                        className="text-xs border border-slate-300 rounded-lg px-2.5 py-1.5 font-semibold"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-slate-600 font-medium">
+                        Até:
+                      </label>
+                      <input
+                        type="date"
+                        value={reportEndDate}
+                        onChange={(e) => {
+                          setReportEndDate(e.target.value);
+                          setReportPreset("CUSTOM");
+                        }}
+                        className="text-xs border border-slate-300 rounded-lg px-2.5 py-1.5 font-semibold"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Quick Date Range Shortcuts */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {[
+                      { id: "WEEK", label: "Esta Semana" },
+                      { id: "MONTH", label: "Mês Atual" },
+                      { id: "LAST30", label: "Últimos 30 Dias" },
+                      { id: "ALL", label: "Todo o Período" },
+                    ].map((btn) => (
+                      <button
+                        key={btn.id}
+                        type="button"
+                        onClick={() =>
+                          handleApplyReportPreset(
+                            btn.id as "WEEK" | "MONTH" | "LAST30" | "ALL"
+                          )
+                        }
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                          reportPreset === btn.id
+                            ? "bg-emerald-600 text-white shadow-sm"
+                            : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                        }`}
+                      >
+                        {btn.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 {/* Report Header Card */}
                 <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-wrap items-center justify-between gap-4">
                   <div>
@@ -2495,10 +2979,16 @@ export default function NutriTrackApp() {
                       Relatório Executivo de Acompanhamento Clínico & Nutricional
                     </span>
                     <h2 className="text-2xl font-extrabold text-slate-900 mt-1">
-                      Paciente: {config?.userName || currentUser?.name || process.env.NEXT_PUBLIC_USER_NAME || "Demo User"} • Referência:{" "}
-                      {selectedMonthYear}
+                      Paciente:{" "}
+                      {config?.userName ||
+                        currentUser?.name ||
+                        process.env.NEXT_PUBLIC_USER_NAME ||
+                        "Demo User"}
                     </h2>
-                    <p className="text-xs text-slate-500 mt-0.5">
+                    <p className="text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 inline-block px-3 py-1 rounded-lg mt-1.5">
+                      📅 Período Avaliado: {reportStats.periodLabel}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-1.5">
                       Destinatário:{" "}
                       <strong>
                         {config?.nutritionistName || "Dra. Nutricionista"}
@@ -2535,13 +3025,13 @@ export default function NutriTrackApp() {
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
                     <span className="text-xs text-slate-500">
-                      Taxa de Adesão Mensal
+                      Taxa de Adesão no Período
                     </span>
                     <div className="text-3xl font-extrabold text-emerald-600 mt-1">
                       {reportStats.adherencePct}%
                     </div>
                     <span className="text-[11px] text-slate-500">
-                      {reportStats.totalLogged} refeições auditadas no mês
+                      {reportStats.totalLogged} refeições auditadas no período
                     </span>
                   </div>
                   <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
@@ -2579,11 +3069,40 @@ export default function NutriTrackApp() {
                   </div>
                 </div>
 
+                {/* SPEC-11: Adherence by Meal Type Breakdown */}
+                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm print-break-inside-avoid">
+                  <h3 className="text-sm font-bold text-slate-900 mb-3">
+                    Adesão por Tipo de Refeição ({reportStats.periodLabel})
+                  </h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                    {reportStats.adherenceByMealType.map((m) => (
+                      <div
+                        key={m.mealType}
+                        className="p-3 rounded-xl border border-slate-200 bg-slate-50/70 flex flex-col justify-between"
+                      >
+                        <span
+                          className={`text-[11px] font-bold px-2 py-0.5 rounded border self-start ${m.badgeColor}`}
+                        >
+                          {m.label}
+                        </span>
+                        <div className="text-xl font-extrabold text-slate-900 mt-2">
+                          {m.pct}%
+                        </div>
+                        <div className="text-[10px] text-slate-500 mt-0.5">
+                          {m.completed} ok • {m.substituted} subst • {m.skipped}{" "}
+                          pul ({m.total} reg)
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
                 {/* Adherence & Hydration Chart */}
                 {reportStats.chartData.length > 0 && (
                   <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm print-break-inside-avoid">
                     <h3 className="text-sm font-bold text-slate-900 mb-4">
-                      Evolução Diária de Refeições & Hidratação ({selectedMonthYear})
+                      Evolução Diária de Refeições & Hidratação (
+                      {reportStats.periodLabel})
                     </h3>
                     <div className="w-full h-64">
                       <ResponsiveContainer width="100%" height="100%">
@@ -2619,11 +3138,13 @@ export default function NutriTrackApp() {
                 {/* Substitutions History */}
                 <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm print-break-inside-avoid">
                   <h3 className="text-base font-bold text-slate-900 mb-3">
-                    Histórico de Substituições e Observações do Mês
+                    Histórico de Substituições, Furos e Observações (
+                    {reportStats.periodLabel})
                   </h3>
                   {reportStats.substitutionsList.length === 0 ? (
                     <p className="text-xs text-slate-500">
-                      Nenhuma substituição registrada neste mês.
+                      Nenhuma substituição ou refeição fora do plano registrada
+                      neste período.
                     </p>
                   ) : (
                     <div className="space-y-2">
@@ -2635,7 +3156,11 @@ export default function NutriTrackApp() {
                           <div>
                             <span className="font-bold text-amber-900">
                               {sub.date} •{" "}
-                              {sub.mealPlanTemplate?.title || sub.mealType}
+                              {sub.mealPlanTemplate?.title || sub.mealType} (
+                              {sub.status === "SKIPPED"
+                                ? "Pulado"
+                                : "Substituído"}
+                              )
                             </span>
                             <p className="text-slate-700 mt-0.5">
                               {sub.actualNotes}
@@ -2659,14 +3184,16 @@ export default function NutriTrackApp() {
                     Galeria Auditável de Fotos das Refeições (Data, Hora & GPS)
                   </h3>
                   <p className="text-xs text-slate-500 mb-4">
-                    Fotos comprimidas em WebP (&le;400KB) com metadados de
+                    Fotos comprimidas em WebP (&le;400KB) no período{" "}
+                    <strong>{reportStats.periodLabel}</strong> com metadados de
                     horário e geolocalização capturados no check-in
                   </p>
 
                   {reportStats.photosList.length === 0 ? (
                     <div className="p-8 rounded-xl border border-dashed border-slate-300 text-center text-xs text-slate-500">
-                      Nenhuma foto anexada ainda neste mês. Use o botão{" "}
-                      <strong>"Registrar Refeição"</strong> na aba Hoje para
+                      Nenhuma foto anexada neste período (
+                      {reportStats.periodLabel}). Use o botão{" "}
+                      <strong>&ldquo;Registrar Refeição&rdquo;</strong> na aba Hoje para
                       fotografar seu prato!
                     </div>
                   ) : (
@@ -2928,18 +3455,20 @@ export default function NutriTrackApp() {
       )}
 
       {/* =====================================================================
-          MODAL 2: EDITAR PRATO NA MONTAGEM MENSAL DINÂMICA
+          MODAL 2: PERSONALIZAR / CRIAR PRATO NA MONTAGEM MENSAL (SPEC-08)
          ===================================================================== */}
       {editingMeal && (
         <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4 no-print">
-          <div className="bg-white rounded-2xl max-w-xl w-full p-5 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto space-y-4">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-5 shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <span className="text-xs font-bold text-emerald-700 uppercase">
-                  Editar Refeição do Ciclo ({selectedMonthYear})
+                  ✨ Personalizar / Criar Opção Customizada ({selectedMonthYear})
                 </span>
                 <h3 className="text-base font-bold text-slate-900">
-                  {editingMeal.title}
+                  {MEAL_TYPE_META[editingMeal.mealType]?.label ||
+                    editingMeal.mealType}{" "}
+                  • {editingMeal.title}
                 </h3>
               </div>
               <button
@@ -2950,15 +3479,67 @@ export default function NutriTrackApp() {
               </button>
             </div>
 
+            {/* Quick Pre-fill from Nutritionist Official Options */}
+            <div className="p-3 rounded-xl bg-emerald-50/70 border border-emerald-200 space-y-1.5">
+              <label className="block text-xs font-bold text-emerald-900">
+                📋 Carregar Base do Catálogo Oficial da Nutricionista (Opcional):
+              </label>
+              <select
+                value=""
+                onChange={(e) => {
+                  const chosen = nutritionistCatalog.find(
+                    (o) => o.id === e.target.value
+                  );
+                  if (chosen) {
+                    setEditMealTitle(chosen.title);
+                    setEditMealDesc(chosen.description);
+                    // Map existing ingredients by name where possible
+                    const mapped: {
+                      ingredientId: string;
+                      quantityNeeded: number;
+                    }[] = [];
+                    for (const ci of chosen.ingredients) {
+                      const found = ingredients.find(
+                        (ing) =>
+                          ing.name.toLowerCase() === ci.name.toLowerCase()
+                      );
+                      if (found) {
+                        mapped.push({
+                          ingredientId: found.id,
+                          quantityNeeded: ci.quantityNeeded,
+                        });
+                      }
+                    }
+                    if (mapped.length > 0) {
+                      setEditMealIngredients(mapped);
+                    }
+                  }
+                }}
+                className="w-full text-xs border border-emerald-300 rounded-lg px-2.5 py-1.5 bg-white"
+              >
+                <option value="">
+                  -- Selecionar opção da nutricionista para preencher campos --
+                </option>
+                {nutritionistCatalog
+                  .filter((o) => o.mealType === editingMeal.mealType)
+                  .map((opt) => (
+                    <option key={opt.id} value={opt.id}>
+                      {opt.title}
+                    </option>
+                  ))}
+              </select>
+            </div>
+
             <div className="grid grid-cols-3 gap-3">
               <div className="col-span-2">
                 <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Título do Prato
+                  Título do Prato (Livre / Customizado)
                 </label>
                 <input
                   type="text"
                   value={editMealTitle}
                   onChange={(e) => setEditMealTitle(e.target.value)}
+                  placeholder="Ex: Meu Café Proteico Customizado"
                   className="w-full text-xs border border-slate-300 rounded-xl px-3 py-2"
                 />
               </div>
@@ -2977,7 +3558,7 @@ export default function NutriTrackApp() {
 
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">
-                Descrição Detalhada (Porções)
+                Descrição Detalhada (Porções e Gramaturas)
               </label>
               <textarea
                 rows={2}
@@ -2987,11 +3568,62 @@ export default function NutriTrackApp() {
               />
             </div>
 
+            {/* SPEC-08: Multi-Day Replication Selector */}
+            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-800">
+                  📅 Aplicar esta refeição nos seguintes dias da semana:
+                </label>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setEditTargetDays(
+                      editTargetDays.length === 7
+                        ? [editingMeal.dayOfWeek]
+                        : [1, 2, 3, 4, 5, 6, 0]
+                    )
+                  }
+                  className="text-[11px] font-bold text-emerald-700 hover:underline"
+                >
+                  {editTargetDays.length === 7
+                    ? "Apenas dia atual"
+                    : "Selecionar Seg a Dom (Todos)"}
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {DAY_LABELS.map((d) => {
+                  const checked = editTargetDays.includes(d.dow);
+                  return (
+                    <button
+                      key={d.dow}
+                      type="button"
+                      onClick={() => {
+                        if (checked && editTargetDays.length > 1) {
+                          setEditTargetDays(
+                            editTargetDays.filter((x) => x !== d.dow)
+                          );
+                        } else if (!checked) {
+                          setEditTargetDays([...editTargetDays, d.dow]);
+                        }
+                      }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${
+                        checked
+                          ? "bg-emerald-600 text-white border-emerald-700 shadow-sm"
+                          : "bg-white text-slate-600 border-slate-300 hover:bg-slate-100"
+                      }`}
+                    >
+                      {d.short}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             {/* Linked Ingredients Editor */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold text-slate-700">
-                  Ingredientes Vinculados (Recalcula Lista de Compras)
+                  Ingredientes Vinculados (Recalcula Meta Semanal & Mensal)
                 </label>
                 <button
                   type="button"
@@ -3005,11 +3637,11 @@ export default function NutriTrackApp() {
                   }}
                   className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700"
                 >
-                  <Plus className="w-3.5 h-3.5" /> Adicionar Ingrediente
+                  <Plus className="w-3.5 h-3.5" /> Vincular Ingrediente do Catálogo
                 </button>
               </div>
 
-              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+              <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
                 {editMealIngredients.map((row, idx) => (
                   <div key={idx} className="flex items-center gap-2">
                     <select
@@ -3051,6 +3683,58 @@ export default function NutriTrackApp() {
                   </div>
                 ))}
               </div>
+
+              {/* SPEC-08: Create Brand-New Custom Ingredient Inline */}
+              <div className="mt-3 p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                <span className="text-[11px] font-bold text-slate-700 block">
+                  ➕ Cadastrar Novo Ingrediente Customizado no Estoque & Vincular:
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                  <input
+                    type="text"
+                    placeholder="Nome (ex: Pasta de Amendoim)"
+                    value={newIngName}
+                    onChange={(e) => setNewIngName(e.target.value)}
+                    className="sm:col-span-4 text-xs border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white"
+                  />
+                  <select
+                    value={newIngCategory}
+                    onChange={(e) => setNewIngCategory(e.target.value)}
+                    className="sm:col-span-3 text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white"
+                  >
+                    <option value="Proteínas">Proteínas</option>
+                    <option value="Laticínios">Laticínios</option>
+                    <option value="Mercearia">Mercearia</option>
+                    <option value="Frutas">Frutas</option>
+                    <option value="Legumes/Verduras">Legumes/Verduras</option>
+                  </select>
+                  <select
+                    value={newIngUnit}
+                    onChange={(e) => setNewIngUnit(e.target.value)}
+                    className="sm:col-span-2 text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white"
+                  >
+                    <option value="g">g</option>
+                    <option value="ml">ml</option>
+                    <option value="unid">unid</option>
+                    <option value="fatia">fatia</option>
+                  </select>
+                  <input
+                    type="number"
+                    placeholder="Qtd"
+                    value={newIngQty}
+                    onChange={(e) => setNewIngQty(Number(e.target.value))}
+                    className="sm:col-span-1 text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white"
+                  />
+                  <button
+                    type="button"
+                    disabled={creatingCustomIng}
+                    onClick={handleCreateCustomIngredientInModal}
+                    className="sm:col-span-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-lg px-2.5 py-1.5"
+                  >
+                    {creatingCustomIng ? "..." : "+ Criar"}
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
@@ -3066,7 +3750,8 @@ export default function NutriTrackApp() {
                 onClick={handleSaveMealTemplate}
                 className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow"
               >
-                Salvar e Recalcular Compras
+                Salvar ({editTargetDays.length} dia
+                {editTargetDays.length > 1 ? "s" : ""}) e Recalcular Compras
               </button>
             </div>
           </div>
@@ -3079,7 +3764,13 @@ export default function NutriTrackApp() {
           { id: "dashboard", label: "Hoje", icon: CalendarIcon },
           { id: "planner", label: "Cardápio", icon: ChefHat },
           { id: "shopping", label: "Compras", icon: ShoppingCart },
-          { id: "alerts", label: "Alertas", icon: Bell },
+          {
+            id: "alerts",
+            label: `Alertas (${
+              config?.alertTime || config?.cronTime || "18:00"
+            })`,
+            icon: Bell,
+          },
           { id: "report", label: "Nutri PDF", icon: FileText },
         ].map((tab) => {
           const Icon = tab.icon;

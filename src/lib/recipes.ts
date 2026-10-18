@@ -1,145 +1,224 @@
 export interface BaseRecipe {
   id: string;
   title: string;
-  category: string;
-  prepTime: string;
+  yieldPortions: string;
   yieldText: string;
   caloriesPerPortion: string;
+  prepTime: string;
+  category: string;
   ingredients: string[];
   steps: string[];
+  nutritionistTip: string;
   storageTip: string;
 }
 
+/**
+ * SPEC-08: All 8 Official Base Recipes from Page 13 of the Nutritionist's Meal Plan PDF
+ */
 export const BASE_RECIPES: BaseRecipe[] = [
   {
-    id: "pate-fit",
-    title: "Patê de Frango Fit Cremoso",
-    category: "Base Semanal (Ter / Qui / Dom)",
-    prepTime: "15 min",
-    yieldText: "Rende ~350g (5 porções de 70g)",
-    caloriesPerPortion: "105 kcal / 70g",
+    id: "molho-tomate-caseiro",
+    title: "1. Molho de Tomate Caseiro",
+    yieldPortions: "6 porções (50 g cada)",
+    yieldText: "Rende: 6 porções (50 g cada)",
+    caloriesPerPortion: "~35 kcal / porção",
+    prepTime: "25 minutos",
+    category: "Base Culinária Funcional",
     ingredients: [
-      "250g de peito de frango cozido e bem desfiado",
-      "70g de requeijão light (ou creme de ricota light)",
-      "40g de cenoura crua ralada bem fininha",
-      "Cheiro-verde (salsinha e cebolinha) picado a gosto",
-      "Sal, pimenta-do-reino, páprica doce e alho em pó a gosto",
+      "Tomate maduro: 6 unidades (600 g)",
+      "Cebola: 1/2 unidade (50 g)",
+      "Alho: 2 dentes (10 g)",
+      "Azeite de oliva: 1 colher de sopa (10 ml)",
+      "Folhas de manjericão: a gosto",
+      "Sal e pimenta-do-reino: a gosto",
     ],
     steps: [
-      "Cozinhe o peito de frango em água com temperos naturais (alho, cebola, louro) e desfie ainda quente.",
-      "Em um bowl, misture o frango desfiado frio com a cenoura ralada no ralo fino.",
-      "Adicione o requeijão light aos poucos, mexendo com um garfo até atingir textura cremosa de patê.",
-      "Tempere com salsinha, cebolinha e pimenta-do-reino.",
+      "Lave os tomates, faça um corte em X na base e leve ao fogo por 1 minuto. Retire, descasque e pique.",
+      "Em uma panela, aqueça o azeite e refogue a cebola e o alho até dourarem.",
+      "Adicione os tomates picados, tempere com sal e pimenta e cozinhe em fogo baixo por 15–20 minutos, mexendo às vezes, até formar um molho.",
+      "Finalize com manjericão e desligue o fogo. Bata no liquidificador (opcional).",
     ],
-    storageTip: "Conservar em pote de vidro hermético na geladeira por até 5 dias.",
-  },
-  {
-    id: "hamburguer-caseiro",
-    title: "Hambúrguer Caseiro de Patinho (140g)",
-    category: "Lanches & Jantares (Qua / Sáb)",
-    prepTime: "20 min",
-    yieldText: "Rende 4 hambúrgueres de 140g (peso cru)",
-    caloriesPerPortion: "185 kcal / 140g",
-    ingredients: [
-      "560g de patinho bovino moído 2 vezes (sem gordura aparente)",
-      "2 dentes de alho bem picados ou pasta de alho",
-      "1/2 cebola pequena ralada e espremida",
-      "Cheiro-verde picado bem fino",
-      "Sal, pimenta-do-reino e páprica defumada a gosto",
-      "2 colheres de sopa de água gelada (para dar liga e suculência)",
-    ],
-    steps: [
-      "Em uma tigela, misture a carne moída com o alho, a cebola ralada, o sal e a páprica.",
-      "Adicione a água gelada e amasse rapidamente com as mãos por 1 a 2 minutos até dar liga.",
-      "Divida em 4 bolas iguais de 140g cada e molde os discos (aprox. 1,5 cm de altura).",
-      "Grelhe em frigideira antiaderente bem quente por 3-4 minutos de cada lado.",
-    ],
-    storageTip: "Pode congelar cru separado por papel manteiga por até 60 dias.",
-  },
-  {
-    id: "molho-tomate",
-    title: "Molho de Tomate Caseiro Rústico",
-    category: "Almoços & Rap10 (Ter / Qua / Sex)",
-    prepTime: "35 min",
-    yieldText: "Rende ~500g de molho",
-    caloriesPerPortion: "18 kcal / 40g",
-    ingredients: [
-      "6 tomates italianos bem maduros picados",
-      "1/2 cebola picada em cubos pequenos",
-      "2 dentes de alho laminados",
-      "Folhas de manjericão fresco e orégano",
-      "1 fio de azeite de oliva extravirgem, sal e pimenta-do-reino",
-    ],
-    steps: [
-      "Refogue a cebola e o alho com 1 fio mínimo de azeite e um pingo de água até dourar.",
-      "Acrescente os tomates picados com pele e sementes, tampe e deixe cozinhar em fogo baixo por 25 minutos.",
-      "Amasse com uma colher de pau ou bata rapidamente no mixer para textura rústica.",
-      "Finalize com manjericão fresco, orégano e acerte o sal.",
-    ],
-    storageTip: "Dura 5 dias na geladeira ou 90 dias congelado em porções.",
+    nutritionistTip:
+      "Conserve na geladeira por até 5 dias ou congele em porções individuais.",
+    storageTip:
+      "Conserve na geladeira por até 5 dias ou congele em porções individuais.",
   },
   {
     id: "lasanha-berinjela",
-    title: "Lasanha de Berinjela Fit (Substituição Inteligente)",
-    category: "Substituição de Almoço / Jantar",
-    prepTime: "30 min",
-    yieldText: "Rende 2 porções individuais",
-    caloriesPerPortion: "240 kcal / porção",
+    title: "2. Lasanha de Berinjela",
+    yieldPortions: "6 porções (1 fatia média = 250 g)",
+    yieldText: "Rende: 6 porções (1 fatia média = 250 g)",
+    caloriesPerPortion: "~230 kcal / fatia",
+    prepTime: "60 minutos",
+    category: "Prato Principal (Almoço Opção 11)",
     ingredients: [
-      "1 berinjela média fatiada longitudinalmente (substitui a massa)",
-      "200g de patinho moído refogado ou frango desfiado",
-      "80g de molho de tomate caseiro",
-      "30g de queijo muçarela ou minas ralado",
-      "Orégano e manjericão a gosto",
+      "Berinjela: 2 unidades médias (500 g)",
+      "Molho de tomate caseiro: 2 xícaras (400 g)",
+      "Carne moída magra: 300 g",
+      "Cebola: 1 unidade (100 g)",
+      "Alho: 2 dentes (10 g)",
+      "Ricota ou queijo cottage: 200 g",
+      "Queijo muçarela: 100 g",
+      "Azeite de oliva: 1 colher de sopa (10 ml)",
+      "Sal, pimenta e orégano: a gosto",
     ],
     steps: [
-      "Fatie a berinjela fina e grelhe rapidamente na frigideira antiaderente dos dois lados para amaciar.",
-      "Em um refratário pequeno, intercale camadas de molho de tomate, berinjela grelhada e proteína (patinho ou frango).",
-      "Finalize com a muçarela e orégano por cima.",
-      "Leve ao forno ou Airfryer a 180°C por 10 minutos para gratinar.",
+      "Corte as berinjelas em fatias no sentido do comprimento, tempere com sal e deixe descansar por 20 minutos. Enxágue e seque. Grelhe em frigideira antiaderente dos dois lados.",
+      "Refogue a cebola e o alho no azeite, adicione a carne moída, tempere e cozinhe até ficar soltinha. Acrescente o molho de tomate.",
+      "Em um refratário, alterne camadas de molho com carne, berinjela grelhada e ricota. Finalize com molho e muçarela.",
+      "Leve ao forno preaquecido a 180 °C por 25–30 minutos.",
     ],
-    storageTip: "Excelente opção low-carb para variar o jantar mantendo as metas.",
+    nutritionistTip:
+      "Sirva com salada verde para uma refeição leve e completa.",
+    storageTip:
+      "Sirva com salada verde para uma refeição leve e completa.",
   },
   {
-    id: "pure-batata",
-    title: "Purê de Batata Inglesa Leve (Quinta-feira)",
-    category: "Almoço (Quinta-feira c/ Tilápia)",
-    prepTime: "20 min",
-    yieldText: "Rende 2 porções de 90g",
-    caloriesPerPortion: "78 kcal / 90g",
+    id: "pure-saudavel",
+    title: "3. Purê Saudável",
+    yieldPortions: "4 porções (150 g cada)",
+    yieldText: "Rende: 4 porções (150 g cada)",
+    caloriesPerPortion: "~130 kcal / porção",
+    prepTime: "30 minutos",
+    category: "Acompanhamento (Almoço Opção 3)",
     ingredients: [
-      "180g de batata inglesa descascada e picada",
-      "20ml de leite desnatado/semidesnatado morno",
-      "1 colher de chá rasa de requeijão light (opcional)",
-      "Sal, noz-moscada ralada na hora e cebolinha",
+      "Batata-doce: 500 g ou Batata inglesa: 300 g",
+      "Leite desnatado: 1/2 xícara (120 ml)",
+      "Azeite de oliva: 1 colher de sopa (10 ml)",
+      "Sal, noz-moscada e pimenta: a gosto",
     ],
     steps: [
-      "Cozinhe a batata inglesa em água com pouco sal até ficar bem macia.",
-      "Escorra e amasse ainda quente com espremedor ou garfo.",
-      "Adicione o leite morno e misture vigorosamente até ficar aerado.",
-      "Tempere com uma pitada de noz-moscada.",
+      "Cozinhe as batatas até ficarem macias.",
+      "Amasse ou bata no mixer com o leite e o azeite até obter um purê cremoso.",
+      "Tempere com sal, noz-moscada e pimenta.",
     ],
-    storageTip: "Consuma fresco ou conserve na geladeira por até 3 dias.",
+    nutritionistTip:
+      "Fica ótimo com frango grelhado, carnes magras, tilápia ou legumes.",
+    storageTip:
+      "Fica ótimo com frango grelhado, carnes magras, tilápia ou legumes.",
   },
   {
-    id: "panqueca-aveia",
-    title: "Panqueca / Crepioca de Banana e Aveia (Terça Lanche)",
-    category: "Lanche da Tarde (Terça-feira)",
-    prepTime: "10 min",
-    yieldText: "1 porção individual",
-    caloriesPerPortion: "265 kcal / porção",
+    id: "pate-fit",
+    title: "4. Patê Fit",
+    yieldPortions: "6 porções (30 g cada)",
+    yieldText: "Rende: 6 porções (30 g cada)",
+    caloriesPerPortion: "~65 kcal / porção",
+    prepTime: "15 minutos",
+    category: "Proteína Prática (Café Opções 1/2/3 & Lanche Opção 5)",
     ingredients: [
-      "2 ovos inteiros",
-      "1 banana-prata madura amassada (80g)",
-      "15g de aveia em flocos finos",
-      "Canela em pó a gosto",
+      "Frango cozido e desfiado: 200 g (ou Sardinha/Atum escorrido)",
+      "Ricota ou cream cheese light: 100 g",
+      "Cenoura ralada: 2 colheres de sopa (20 g)",
+      "Salsinha: 1 colher de sopa (5 g)",
+      "Suco de limão: 1 colher de chá (5 ml)",
+      "Sal, pimenta e orégano: a gosto",
     ],
     steps: [
-      "Amasse bem a banana-prata com um garfo até virar um purê liso.",
-      "Adicione os 2 ovos, a aveia em flocos e a canela em pó, batendo bem.",
-      "Despeje em frigideira antiaderente untada com 1 gota de azeite em fogo baixo.",
-      "Tampe, deixe dourar por 3 minutos, vire e doure o outro lado.",
+      "Bata o frango com a ricota no processador até formar uma pasta.",
+      "Misture a cenoura, salsinha, limão e temperos.",
+      "Leve à geladeira por 30 minutos antes de servir.",
     ],
-    storageTip: "Prepare na hora para manter a textura macia e quentinha.",
+    nutritionistTip:
+      "Sirva com pães integrais, pão francês, torradas ou palitos de legumes.",
+    storageTip:
+      "Sirva com pães integrais, pão francês, torradas ou palitos de legumes.",
+  },
+  {
+    id: "pizza-frigideira-rap10",
+    title: "5. Pizza de Frigideira com Rap 10",
+    yieldPortions: "1 porção",
+    yieldText: "Rende: 1 porção",
+    caloriesPerPortion: "~245 kcal / unidade",
+    prepTime: "15 minutos",
+    category: "Lanche Rápido (Lanche Opção 3 & Jantar Opção 7)",
+    ingredients: [
+      "Rap 10 integral: 1 unidade (40 g)",
+      "Molho de tomate: 2 colheres de sopa (30 g)",
+      "Queijo muçarela: 30 g",
+      "Tomate fatiado: 3 rodelas (50 g)",
+      "Orégano: a gosto",
+    ],
+    steps: [
+      "Espalhe o molho sobre o Rap 10.",
+      "Adicione o queijo, o tomate e o orégano (+ frango desfiado ou ovos picados conforme a opção do cardápio).",
+      "Leve à frigideira antiaderente com tampa em fogo baixo por 8–10 minutos, até o queijo derreter.",
+    ],
+    nutritionistTip:
+      "Use outros recheios leves: frango desfiado, atum ou vegetais.",
+    storageTip:
+      "Use outros recheios leves: frango desfiado, atum ou vegetais.",
+  },
+  {
+    id: "massa-panqueca",
+    title: "6. Massa de Panqueca",
+    yieldPortions: "6 unidades (1 panqueca = 60 g)",
+    yieldText: "Rende: 6 unidades (1 panqueca = 60 g)",
+    caloriesPerPortion: "~75 kcal / disco",
+    prepTime: "20 minutos",
+    category: "Massa Funcional (Almoço Opção 12)",
+    ingredients: [
+      "Ovo: 1 unidade (50 g)",
+      "Leite desnatado: 1/2 xícara (120 ml)",
+      "Aveia em flocos finos: 2 colheres de sopa (20 g)",
+      "Farinha de aveia ou integral: 3 colheres de sopa (30 g)",
+      "Sal: uma pitada",
+    ],
+    steps: [
+      "Bata todos os ingredientes no liquidificador até formar uma massa homogênea.",
+      "Aqueça uma frigideira antiaderente e despeje uma concha pequena da massa.",
+      "Doure dos dois lados. Recheie a gosto (frango desfiado ou carne moída magra + molho de tomate).",
+    ],
+    nutritionistTip: "Rende 6 panquecas médias leves e ricas em fibras.",
+    storageTip: "Rende 6 panquecas médias leves e ricas em fibras.",
+  },
+  {
+    id: "hamburguer-natural",
+    title: "7. Hambúrguer Natural",
+    yieldPortions: "4 unidades (1 hambúrguer = 100 g)",
+    yieldText: "Rende: 4 unidades (1 hambúrguer = 100 g)",
+    caloriesPerPortion: "~165 kcal / unidade",
+    prepTime: "30 minutos",
+    category: "Proteína Magra (Lanche Opção 8 & Jantar Opção 1)",
+    ingredients: [
+      "Patinho moído: 400 g (ou peito de frango moído)",
+      "Cebola ralada: 2 colheres de sopa (20 g)",
+      "Alho picado: 1 dente (5 g)",
+      "Salsinha picada: 1 colher de sopa (5 g)",
+      "Sal, pimenta e cominho: a gosto",
+    ],
+    steps: [
+      "Misture todos os ingredientes até ficar homogêneo.",
+      "Modele os hambúrgueres (cerca de 100 g cada).",
+      "Grelhe em frigideira antiaderente ou asse em forno médio (180 °C) por 20 minutos, virando na metade do tempo.",
+    ],
+    nutritionistTip:
+      "Congele as unidades cruas por até 3 meses. Grelhe sem óleo ou com 1 fio de azeite.",
+    storageTip:
+      "Congele as unidades cruas por até 3 meses. Grelhe sem óleo ou com 1 fio de azeite.",
+  },
+  {
+    id: "panqueca-banana",
+    title: "8. Panqueca de Banana",
+    yieldPortions: "2 unidades (1 panqueca = 120 g)",
+    yieldText: "Rende: 2 unidades (1 panqueca = 120 g)",
+    caloriesPerPortion: "~195 kcal / receita",
+    prepTime: "15 minutos",
+    category: "Pré-Treino / Café / Lanche (Opção 10)",
+    ingredients: [
+      "Banana-prata: 1 unidade média (100 g)",
+      "Ovo: 1 unidade (50 g)",
+      "Aveia em flocos finos: 1 colher de sopa (15 g)",
+      "Canela: a gosto",
+    ],
+    steps: [
+      "Amasse a banana em uma tigela.",
+      "Adicione o ovo, a aveia e a canela. Misture bem.",
+      "Aqueça uma frigideira antiaderente com um fio de azeite e despeje metade da massa.",
+      "Doure dos dois lados. Repita com o restante.",
+    ],
+    nutritionistTip:
+      "Sirva com frutas ou pasta de amendoim 100% (1 colher de chá).",
+    storageTip:
+      "Sirva com frutas ou pasta de amendoim 100% (1 colher de chá).",
   },
 ];

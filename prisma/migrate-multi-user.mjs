@@ -9,6 +9,29 @@ function hashPassword(password) {
   return `scrypt:${salt}:${derivedKey}`;
 }
 
+function getCurrentIsoWeekSaoPaulo(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const y = Number(parts.find((p) => p.type === "year")?.value || 2026);
+  const m = Number(parts.find((p) => p.type === "month")?.value || 1);
+  const d = Number(parts.find((p) => p.type === "day")?.value || 1);
+
+  const target = new Date(Date.UTC(y, m - 1, d));
+  const dayNr = (target.getUTCDay() + 6) % 7;
+  target.setUTCDate(target.getUTCDate() - dayNr + 3);
+  const firstThursday = target.valueOf();
+  target.setUTCMonth(0, 1);
+  if (target.getUTCDay() !== 4) {
+    target.setUTCMonth(0, 1 + ((4 - target.getUTCDay() + 7) % 7));
+  }
+  const weekNo = 1 + Math.ceil((firstThursday - target.valueOf()) / 604800000);
+  return `${target.getUTCFullYear()}-W${String(weekNo).padStart(2, "0")}`;
+}
+
 async function tableExists(tableName) {
   const rows = await prisma.$queryRawUnsafe(
     `SELECT name FROM sqlite_master WHERE type='table' AND name=?`,
@@ -23,17 +46,16 @@ async function columnExists(tableName, columnName) {
 }
 
 export async function runZeroDataLossMigration() {
-  console.log("[SDD-002 Migration] Checking database state for multi-user isolation...");
+  console.log("[SDD-002/003 Migration] Checking database state...");
 
   await prisma.$queryRawUnsafe(`PRAGMA journal_mode=WAL;`);
 
   const hasIngredientTable = await tableExists("Ingredient");
   if (!hasIngredientTable) {
-    console.log("[SDD-002 Migration] Fresh database detected. Skipping legacy migration.");
+    console.log("[SDD-002/003 Migration] Fresh database detected. Skipping legacy migration.");
     return;
   }
 
-  // Read legacy AppConfig if available to preserve owner name and email
   let ownerName = process.env.NEXT_PUBLIC_USER_NAME || "Demo User";
   let ownerEmail = (
     process.env.ALERT_RECIPIENT_EMAIL || "user@example.com"
@@ -51,11 +73,10 @@ export async function runZeroDataLossMigration() {
         }
       }
     } catch {
-      // ignore if AppConfig is empty
+      // ignore
     }
   }
 
-  // Ensure User table exists
   await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS "User" (
       "id" TEXT NOT NULL PRIMARY KEY,
@@ -70,7 +91,6 @@ export async function runZeroDataLossMigration() {
     CREATE UNIQUE INDEX IF NOT EXISTS "User_email_key" ON "User"("email");
   `);
 
-  // Find or create primary owner user
   const existingUsers = await prisma.$queryRawUnsafe(
     `SELECT id, email FROM "User" ORDER BY createdAt ASC LIMIT 1`
   );
@@ -90,7 +110,7 @@ export async function runZeroDataLossMigration() {
       passwordHash
     );
     console.log(
-      `[SDD-002 Migration] Created primary owner account: ${ownerName} <${ownerEmail}> (id=${ownerId})`
+      `[SDD-002/003 Migration] Created primary owner account: ${ownerName} <${ownerEmail}> (id=${ownerId})`
     );
   }
 
@@ -106,9 +126,6 @@ export async function runZeroDataLossMigration() {
     if (!(await tableExists(table))) continue;
     const hasUserId = await columnExists(table, "userId");
     if (!hasUserId) {
-      console.log(
-        `[SDD-002 Migration] Adding userId column to ${table} and linking existing rows to ${ownerId}...`
-      );
       await prisma.$executeRawUnsafe(
         `ALTER TABLE "${table}" ADD COLUMN "userId" TEXT NOT NULL DEFAULT '${ownerId}';`
       );
@@ -119,15 +136,56 @@ export async function runZeroDataLossMigration() {
     );
   }
 
-  // Drop old single-tenant unique index on Ingredient(name) if present
   await prisma.$executeRawUnsafe(`DROP INDEX IF EXISTS "Ingredient_name_key";`);
 
-  console.log("[SDD-002 Migration] Zero-data-loss multi-user migration completed.");
+  // SDD-003 columns on Ingredient
+  if (!(await columnExists("Ingredient", "boughtForWeekAt"))) {
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "Ingredient" ADD COLUMN "boughtForWeekAt" DATETIME;`
+    );
+  }
+  if (!(await columnExists("Ingredient", "weekCycleKey"))) {
+    await prisma.$executeRawUnsafe(
+      `ALTER TABLE "Ingredient" ADD COLUMN "weekCycleKey" TEXT;`
+    );
+    const currentWeek = getCurrentIsoWeekSaoPaulo();
+    await prisma.$executeRawUnsafe(
+      `UPDATE "Ingredient" SET "weekCycleKey" = ?, "boughtForWeekAt" = CURRENT_TIMESTAMP WHERE "boughtForWeek" = 1 AND "weekCycleKey" IS NULL`,
+      currentWeek
+    );
+  }
+
+  // SDD-003 columns on AppConfig
+  if (await tableExists("AppConfig")) {
+    if (!(await columnExists("AppConfig", "alertTime"))) {
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE "AppConfig" ADD COLUMN "alertTime" TEXT NOT NULL DEFAULT '18:00';`
+      );
+      await prisma.$executeRawUnsafe(
+        `UPDATE "AppConfig" SET "alertTime" = COALESCE("cronTime", '18:00');`
+      );
+    }
+    if (!(await columnExists("AppConfig", "alertEnabled"))) {
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE "AppConfig" ADD COLUMN "alertEnabled" BOOLEAN NOT NULL DEFAULT 1;`
+      );
+      await prisma.$executeRawUnsafe(
+        `UPDATE "AppConfig" SET "alertEnabled" = COALESCE("cronEnabled", 1);`
+      );
+    }
+    if (!(await columnExists("AppConfig", "lastAlertRunDate"))) {
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE "AppConfig" ADD COLUMN "lastAlertRunDate" TEXT;`
+      );
+    }
+  }
+
+  console.log("[SDD-002/003 Migration] Zero-data-loss migration completed.");
 }
 
 runZeroDataLossMigration()
   .catch((err) => {
-    console.error("[SDD-002 Migration] Error:", err);
+    console.error("[SDD-002/003 Migration] Error:", err);
     process.exit(1);
   })
   .finally(async () => {

@@ -23,17 +23,19 @@ O **NutriTrack-OS** é uma plataforma web full-stack, *Mobile-First* e *PWA-read
    - Linha do tempo das refeições do dia (`Café da Manhã`, `Colação`, `Almoço`, `Lanche`, `Jantar`, `Ceia`) com check-in rápido (`Concluído`, `Substituído`, `Pulado`).
    - Registro fotográfico auditável com **compressão client-side em Canvas para WebP ($\le 400\text{ KB}$)**, captura automática de **horário exato** e **geolocalização GPS** (resolvida via *OpenStreetMap Nominatim Reverse Geocoding* ou tags rápidas) estampados como badge sobre a foto.
    - Calendário interativo de adesão mensal (Verde = Concluído, Amarelo = Parcial/Substituído, Vermelho = Fora do Plano).
-2. **Montagem Mensal Dinâmica & Guia de Receitas Base:**
-   - Edição completa do ciclo semanal (Segunda a Domingo) para qualquer mês (`YYYY-MM`), recalculando automaticamente a necessidade semanal (`weeklyNeed`) e mensal (`monthlyNeed`) na lista de compras.
-   - Catálogo embutido de receitas base funcionais (*Patê Fit Cremoso, Hambúrguer Caseiro de Patinho, Molho de Tomate Rústico, Lasanha de Berinjela Fit, Purê Leve e Panqueca de Banana e Aveia*).
-3. **Lista de Compras Inteligente (Mensal vs. Semanal):**
+2. **Montagem Mensal Dinâmica, Catálogo Oficial da Nutricionista (PDF) & Guia de Receitas Base (`SPEC-08`):**
+   - Catálogo oficial completo com **48 opções originais do PDF da Nutricionista** distribuídas nas 6 refeições do dia (6 Cafés da Manhã, 3 Colações, 12 Almoços, 10 Lanches da Tarde, 9 Jantares e 8 Ceias).
+   - Criação de **Pratos Customizados** com vínculo de novos ingredientes e **replicação multi-dias (`Seg` a `Dom`)**, recalculando automaticamente a necessidade semanal (`weeklyNeed`) e mensal (`monthlyNeed`) na lista de compras.
+   - Catálogo embutido com as **8 Receitas Base oficiais da página 13 do PDF** (*1. Molho de Tomate Caseiro, 2. Lasanha de Berinjela, 3. Purê Saudável, 4. Patê Fit, 5. Pizza de Frigideira com Rap 10, 6. Massa de Panqueca, 7. Hambúrguer Natural e 8. Panqueca de Banana*).
+3. **Lista de Compras Inteligente & Expiração Semanal Automática (`SPEC-09`):**
    - Catálogo pré-populado com *Default Balanced Meal Plan Template (Sample Seed)* contendo 39 insumos e 42 refeições semanais.
-   - Checkboxes independentes e persistentes: `[ ] Tenho pro Mês` (`inStock`) e `[ ] Comprado pra Semana` (`boughtForWeek`).
-   - Alerta visual em tempo real (`🚨 Falta para Amanhã!`) para qualquer ingrediente desmarcado que será exigido no cardápio de `D+1`.
-4. **Lookahead Inventory Alert Engine (Cron 18:00):**
-   - Agendador interno (`node-cron` via Next.js Instrumentation Hook) que cruza diariamente às `18:00` as refeições de amanhã (`D+1`) com itens fora de estoque (`!inStock && !boughtForWeek`), enviando alerta HTML via **SMTP** ou **Resend API** (além de botão de disparo e preview imediato na interface).
-5. **Relatório Executivo para Nutricionista:**
-   - Consolidação de KPIs mensais (% de adesão, média de hidratação, histórico de substituições justificadas e galeria de fotos auditadas com data/hora/GPS), estilizada com `@media print` para exportação direta em PDF (`window.print()`).
+   - Checkboxes independentes e persistentes: `[ ] Tenho pro Mês` (`inStock`) e `[ ] Comprado p/ Semana` (`boughtForWeek`).
+   - **Expiração Semanal Inteligente (`weekCycleKey`):** Itens marcados em `[ ] Comprado p/ Semana` recebem a chave da semana ISO corrente (ex: `2026-W42`) e são **automaticamente desmarcados na virada de segunda-feira às 00:00**, voltando a integrar os alertas preventivos da nova semana.
+4. **Lookahead Inventory Alert Engine com Horário Dinâmico (`SPEC-10`):**
+   - Agendador interno (`node-cron` via Next.js Instrumentation Hook) com **horário 100% configurável por usuário** (`alertTime`, ex: `18:00`, `19:30`), que cruza diariamente as refeições de amanhã (`D+1`) com itens fora de estoque (`!inStock && !boughtForWeek`), enviando alerta HTML via **SMTP** ou **Resend API**.
+5. **Relatório Executivo para Nutricionista com Filtro de Período (`SPEC-11`):**
+   - Seletor de período customizado (`startDate` até `endDate`) e atalhos rápidos (*Esta Semana*, *Mês Atual*, *Últimos 30 Dias*, *Todo o Período*).
+   - Consolidação de KPIs (% de adesão geral, adesão por tipo de refeição, média de hidratação, histórico de substituições e galeria de fotos auditadas com data/hora/GPS), estilizada com `@media print` para exportação direta em PDF (`window.print()`).
 6. **Autenticação Multi-Usuário & Isolamento Completo (`SDD-002`):**
    - Login e Cadastro instantâneo com sessão **JWT Stateless (`jose` + Cookie `HttpOnly`)** e hash de senha nativo (`crypto.scrypt`).
    - **Auto-Onboarding:** Cada nova conta criada recebe automaticamente seu próprio catálogo de 39 ingredientes e 42 refeições semanais em uma transação isolada por `userId`.
@@ -50,12 +52,13 @@ O sistema foi engenheirado para operar com folga em instâncias Cloud IaaS *Free
 - **Caddy Server Reverse Proxy (`~13 MiB RAM`):** Provisionamento e renovação automática de certificados TLS/HTTPS Let's Encrypt.
 
 📚 **Documentação Técnica SDD Completa:**
-- [**Software Design Document (`docs/SDD.md`)**](docs/SDD.md) — Especificação completa de arquitetura, diagramas Mermaid, modelo de dados multi-tenant (ERD), regras de negócio (`SPEC-01` a `SPEC-07`) e contratos de API.
+- [**Software Design Document (`docs/SDD.md`)**](docs/SDD.md) — Especificação completa de arquitetura, diagramas Mermaid, modelo de dados multi-tenant (ERD), regras de negócio (`SPEC-01` a `SPEC-12`) e contratos de API.
 - **Architecture Decision Records (`docs/ADR/`):**
   - [ADR-001: SQLite WAL Mode vs. SGBD Gerenciado](docs/ADR/001-sqlite-wal-over-managed-db.md)
   - [ADR-002: Next.js Standalone & Caddy Auto-HTTPS](docs/ADR/002-nextjs-standalone-and-caddy.md)
   - [ADR-003: Compressão Client-Side WebP $\le 400\text{ KB}$](docs/ADR/003-client-side-webp-compression.md)
   - [ADR-004: Sessão JWT Stateless (`jose`) & Isolamento Multi-Tenant (`userId`)](docs/ADR/004-stateless-jwt-multi-tenant-isolation.md)
+  - [ADR-005: Expiração Semanal Automática (`weekCycleKey`) & Agendador Dinâmico (`alertTime`)](docs/ADR/005-weekly-inventory-expiration-and-dynamic-cron.md)
 
 ---
 

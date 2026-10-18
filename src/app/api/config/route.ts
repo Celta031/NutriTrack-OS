@@ -24,6 +24,8 @@ export async function PUT(req: NextRequest) {
       fastingWaterMl,
       cronTime,
       cronEnabled,
+      alertTime,
+      alertEnabled,
     } = body;
 
     if (typeof userName === "string" && userName.trim() !== "") {
@@ -32,6 +34,14 @@ export async function PUT(req: NextRequest) {
         data: { name: userName.trim() },
       });
     }
+
+    const resolvedAlertTime = alertTime ?? cronTime;
+    const resolvedAlertEnabled =
+      typeof alertEnabled === "boolean"
+        ? alertEnabled
+        : typeof cronEnabled === "boolean"
+        ? cronEnabled
+        : undefined;
 
     const updated = await prisma.appConfig.upsert({
       where: { userId: currentUser.id },
@@ -51,8 +61,19 @@ export async function PUT(req: NextRequest) {
         ...(fastingWaterMl !== undefined
           ? { fastingWaterMl: Number(fastingWaterMl) || 500 }
           : {}),
-        ...(cronTime !== undefined ? { cronTime } : {}),
-        ...(typeof cronEnabled === "boolean" ? { cronEnabled } : {}),
+        ...(resolvedAlertTime !== undefined
+          ? {
+              cronTime: resolvedAlertTime,
+              alertTime: resolvedAlertTime,
+              lastAlertRunDate: null, // Reset so if user sets a new time for today it can fire today
+            }
+          : {}),
+        ...(typeof resolvedAlertEnabled === "boolean"
+          ? {
+              cronEnabled: resolvedAlertEnabled,
+              alertEnabled: resolvedAlertEnabled,
+            }
+          : {}),
       },
       create: {
         userId: currentUser.id,
@@ -68,8 +89,10 @@ export async function PUT(req: NextRequest) {
         emailProvider: emailProvider || "SMTP",
         dailyWaterGoalMl: Number(dailyWaterGoalMl) || 3000,
         fastingWaterMl: Number(fastingWaterMl) || 500,
-        cronTime: cronTime || "18:00",
-        cronEnabled: cronEnabled ?? true,
+        cronTime: resolvedAlertTime || "18:00",
+        cronEnabled: resolvedAlertEnabled ?? true,
+        alertTime: resolvedAlertTime || "18:00",
+        alertEnabled: resolvedAlertEnabled ?? true,
       },
     });
 

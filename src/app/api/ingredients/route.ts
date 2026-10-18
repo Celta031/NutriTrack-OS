@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthenticatedUser } from "@/lib/auth";
+import { getCurrentIsoWeek } from "@/lib/week-cycle";
 
 export async function PATCH(req: NextRequest) {
   try {
@@ -10,22 +11,32 @@ export async function PATCH(req: NextRequest) {
     }
 
     const body = await req.json();
+    const now = new Date();
+    const currentIsoWeek = getCurrentIsoWeek(now);
 
     // Bulk action: reset weekly checkboxes or mark all in stock for current user only
     if (body.action === "RESET_WEEK") {
       await prisma.ingredient.updateMany({
         where: { userId: currentUser.id },
-        data: { boughtForWeek: false },
+        data: {
+          boughtForWeek: false,
+          boughtForWeekAt: null,
+          weekCycleKey: null,
+        },
       });
-      return NextResponse.json({ ok: true });
+      return NextResponse.json({ ok: true, currentIsoWeek });
     }
 
     if (body.action === "MARK_ALL_WEEK") {
       await prisma.ingredient.updateMany({
         where: { userId: currentUser.id },
-        data: { boughtForWeek: true },
+        data: {
+          boughtForWeek: true,
+          boughtForWeekAt: now,
+          weekCycleKey: currentIsoWeek,
+        },
       });
-      return NextResponse.json({ ok: true });
+      return NextResponse.json({ ok: true, currentIsoWeek });
     }
 
     const {
@@ -58,7 +69,13 @@ export async function PATCH(req: NextRequest) {
       where: { id: existing.id },
       data: {
         ...(typeof inStock === "boolean" ? { inStock } : {}),
-        ...(typeof boughtForWeek === "boolean" ? { boughtForWeek } : {}),
+        ...(typeof boughtForWeek === "boolean"
+          ? {
+              boughtForWeek,
+              boughtForWeekAt: boughtForWeek ? now : null,
+              weekCycleKey: boughtForWeek ? currentIsoWeek : null,
+            }
+          : {}),
         ...(typeof weeklyNeed === "number" ? { weeklyNeed } : {}),
         ...(typeof monthlyNeed === "number" ? { monthlyNeed } : {}),
         ...(typeof purchaseFrequency === "string" ? { purchaseFrequency } : {}),
@@ -104,10 +121,24 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const trimmedName = String(name).trim();
+    const existing = await prisma.ingredient.findUnique({
+      where: {
+        userId_name: {
+          userId: currentUser.id,
+          name: trimmedName,
+        },
+      },
+    });
+
+    if (existing) {
+      return NextResponse.json({ ingredient: existing });
+    }
+
     const created = await prisma.ingredient.create({
       data: {
         userId: currentUser.id,
-        name: String(name).trim(),
+        name: trimmedName,
         category,
         unit,
         purchaseFrequency: purchaseFrequency || "WEEKLY",
@@ -115,6 +146,8 @@ export async function POST(req: NextRequest) {
         monthlyNeed: Number(monthlyNeed) || (Number(weeklyNeed) || 0) * 4,
         inStock: false,
         boughtForWeek: false,
+        boughtForWeekAt: null,
+        weekCycleKey: null,
         notes: notes || "",
       },
     });

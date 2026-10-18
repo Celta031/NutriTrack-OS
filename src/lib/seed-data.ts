@@ -1,5 +1,6 @@
 import { prisma, ensureWalMode } from "./prisma";
 import { hashPassword } from "./auth";
+import { getCurrentIsoWeek } from "./week-cycle";
 
 export interface SeedIngredientDef {
   name: string;
@@ -605,7 +606,10 @@ export async function recalculateIngredientNeeds(
     where: { userId },
   });
   for (const ing of allIngredients) {
-    const weekly = weeklyTotals.get(ing.id) ?? ing.weeklyNeed;
+    const weekly =
+      templates.length > 0
+        ? weeklyTotals.get(ing.id) ?? 0
+        : weeklyTotals.get(ing.id) ?? ing.weeklyNeed;
     await prisma.ingredient.update({
       where: { id: ing.id },
       data: {
@@ -617,9 +621,9 @@ export async function recalculateIngredientNeeds(
 }
 
 /**
- * Auto-onboarding function (`SPEC-04` / `SDD-002`):
+ * Auto-onboarding function (`SPEC-04` / `SDD-002` / `SDD-003`):
  * Provisions the 39 default catalog ingredients, 42 weekly meal templates,
- * AppConfig, and initial sample logs for a specific userId inside a Prisma transaction.
+ * and AppConfig for a specific userId inside a Prisma transaction.
  */
 export async function provisionInitialUserData(
   userId: string,
@@ -633,6 +637,7 @@ export async function provisionInitialUserData(
   const currentMonthYear =
     targetMonthYear ||
     `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const currentIsoWeek = getCurrentIsoWeek(now);
 
   const resolvedName =
     userName || process.env.NEXT_PUBLIC_USER_NAME || "Demo User";
@@ -659,6 +664,8 @@ export async function provisionInitialUserData(
           fastingWaterMl: 500,
           cronTime: "18:00",
           cronEnabled: true,
+          alertTime: "18:00",
+          alertEnabled: true,
         },
       });
     }
@@ -680,6 +687,8 @@ export async function provisionInitialUserData(
             monthlyNeed: ing.monthlyNeed,
             inStock: ing.inStock,
             boughtForWeek: ing.boughtForWeek,
+            boughtForWeekAt: ing.boughtForWeek ? now : null,
+            weekCycleKey: ing.boughtForWeek ? currentIsoWeek : null,
             notes: ing.notes,
           },
         });
@@ -723,45 +732,6 @@ export async function provisionInitialUserData(
               },
             });
           }
-        }
-      }
-    }
-
-    // 4. Seed sample historical DailyLogs if user has no logs yet
-    const logsCount = await tx.dailyLog.count({ where: { userId } });
-    if (logsCount === 0) {
-      const templates = await tx.mealPlanTemplate.findMany({
-        where: { userId, monthYear: currentMonthYear },
-      });
-
-      for (let offset = 4; offset >= 1; offset--) {
-        const d = new Date(now);
-        d.setDate(now.getDate() - offset);
-        const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-        const dow = d.getDay();
-        const dayTemplates = templates.filter((t) => t.dayOfWeek === dow);
-
-        for (let i = 0; i < dayTemplates.length; i++) {
-          const tpl = dayTemplates[i];
-          const isSubstituted = offset === 2 && tpl.mealType === "DINNER";
-          await tx.dailyLog.create({
-            data: {
-              userId,
-              date: dateStr,
-              mealPlanTemplateId: tpl.id,
-              mealType: tpl.mealType,
-              status: isSubstituted ? "SUBSTITUTED" : "COMPLETED",
-              actualNotes: isSubstituted
-                ? "Substituído por Lasanha de Berinjela Fit (Guia de Receitas Base) mantendo proteínas."
-                : `Refeição realizada conforme plano (${tpl.title})`,
-              loggedAt: new Date(`${dateStr}T${tpl.scheduledTime}:00`),
-              latitude: -23.5505,
-              longitude: -46.6333,
-              locationName: "Casa • São Paulo, SP",
-              waterIntakeMl: i === 0 ? 2850 : 0,
-              fastingWaterDone: true,
-            },
-          });
         }
       }
     }
