@@ -1,4 +1,5 @@
 import { prisma, ensureWalMode } from "./prisma";
+import { hashPassword } from "./auth";
 
 export interface SeedIngredientDef {
   name: string;
@@ -583,9 +584,12 @@ export const WEEKLY_MEAL_PLAN: SeedMealDef[] = [
   },
 ];
 
-export async function recalculateIngredientNeeds(monthYear: string) {
+export async function recalculateIngredientNeeds(
+  userId: string,
+  monthYear: string
+) {
   const templates = await prisma.mealPlanTemplate.findMany({
-    where: { monthYear },
+    where: { userId, monthYear },
     include: { ingredients: true },
   });
 
@@ -597,7 +601,9 @@ export async function recalculateIngredientNeeds(monthYear: string) {
     }
   }
 
-  const allIngredients = await prisma.ingredient.findMany();
+  const allIngredients = await prisma.ingredient.findMany({
+    where: { userId },
+  });
   for (const ing of allIngredients) {
     const weekly = weeklyTotals.get(ing.id) ?? ing.weeklyNeed;
     await prisma.ingredient.update({
@@ -610,7 +616,17 @@ export async function recalculateIngredientNeeds(monthYear: string) {
   }
 }
 
-export async function ensureSeeded(targetMonthYear?: string) {
+/**
+ * Auto-onboarding function (`SPEC-04` / `SDD-002`):
+ * Provisions the 39 default catalog ingredients, 42 weekly meal templates,
+ * AppConfig, and initial sample logs for a specific userId inside a Prisma transaction.
+ */
+export async function provisionInitialUserData(
+  userId: string,
+  userName?: string,
+  userEmail?: string,
+  targetMonthYear?: string
+) {
   await ensureWalMode();
 
   const now = new Date();
@@ -618,128 +634,192 @@ export async function ensureSeeded(targetMonthYear?: string) {
     targetMonthYear ||
     `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 
-  const defaultUserName = process.env.NEXT_PUBLIC_USER_NAME || "Demo User";
-  const defaultTargetEmail = process.env.ALERT_RECIPIENT_EMAIL || "user@example.com";
+  const resolvedName =
+    userName || process.env.NEXT_PUBLIC_USER_NAME || "Demo User";
+  const resolvedEmail =
+    userEmail || process.env.ALERT_RECIPIENT_EMAIL || "user@example.com";
 
-  // Ensure singleton AppConfig
-  await prisma.appConfig.upsert({
-    where: { id: "singleton" },
-    update: {},
-    create: {
-      id: "singleton",
-      userName: defaultUserName,
-      nutritionistName: "Nutricionista Clínica & Esportiva",
-      targetEmail: defaultTargetEmail,
-      smtpHost: process.env.SMTP_HOST || "smtp.example.com",
-      smtpPort: Number(process.env.SMTP_PORT) || 587,
-      emailProvider: process.env.EMAIL_PROVIDER || "SMTP",
-      dailyWaterGoalMl: 3000,
-      fastingWaterMl: 500,
-      cronTime: "18:00",
-      cronEnabled: true,
-    },
-  });
+  await prisma.$transaction(async (tx) => {
+    // 1. Ensure AppConfig for this user
+    const existingConfig = await tx.appConfig.findUnique({
+      where: { userId },
+    });
 
-  // Upsert all 39 ingredients
-  const existingCount = await prisma.ingredient.count();
-  const ingredientMap = new Map<string, string>();
-
-  if (existingCount === 0) {
-    for (const ing of INITIAL_INGREDIENTS) {
-      const created = await prisma.ingredient.create({
+    if (!existingConfig) {
+      await tx.appConfig.create({
         data: {
-          name: ing.name,
-          category: ing.category,
-          unit: ing.unit,
-          purchaseFrequency: ing.purchaseFrequency,
-          weeklyNeed: ing.weeklyNeed,
-          monthlyNeed: ing.monthlyNeed,
-          inStock: ing.inStock,
-          boughtForWeek: ing.boughtForWeek,
-          notes: ing.notes,
+          userId,
+          userName: resolvedName,
+          nutritionistName: "Nutricionista Clínica & Esportiva",
+          targetEmail: resolvedEmail,
+          smtpHost: process.env.SMTP_HOST || "smtp.example.com",
+          smtpPort: Number(process.env.SMTP_PORT) || 587,
+          emailProvider: process.env.EMAIL_PROVIDER || "SMTP",
+          dailyWaterGoalMl: 3000,
+          fastingWaterMl: 500,
+          cronTime: "18:00",
+          cronEnabled: true,
         },
       });
-      ingredientMap.set(created.name, created.id);
     }
-  } else {
-    const all = await prisma.ingredient.findMany();
-    for (const item of all) {
-      ingredientMap.set(item.name, item.id);
+
+    // 2. Ensure all 39 ingredients for this user
+    const existingCount = await tx.ingredient.count({ where: { userId } });
+    const ingredientMap = new Map<string, string>();
+
+    if (existingCount === 0) {
+      for (const ing of INITIAL_INGREDIENTS) {
+        const created = await tx.ingredient.create({
+          data: {
+            userId,
+            name: ing.name,
+            category: ing.category,
+            unit: ing.unit,
+            purchaseFrequency: ing.purchaseFrequency,
+            weeklyNeed: ing.weeklyNeed,
+            monthlyNeed: ing.monthlyNeed,
+            inStock: ing.inStock,
+            boughtForWeek: ing.boughtForWeek,
+            notes: ing.notes,
+          },
+        });
+        ingredientMap.set(created.name, created.id);
+      }
+    } else {
+      const all = await tx.ingredient.findMany({ where: { userId } });
+      for (const item of all) {
+        ingredientMap.set(item.name, item.id);
+      }
     }
-  }
 
-  // Ensure MealPlanTemplates for currentMonthYear
-  const monthPlansCount = await prisma.mealPlanTemplate.count({
-    where: { monthYear: currentMonthYear },
-  });
+    // 3. Ensure MealPlanTemplates for currentMonthYear for this user
+    const monthPlansCount = await tx.mealPlanTemplate.count({
+      where: { userId, monthYear: currentMonthYear },
+    });
 
-  if (monthPlansCount === 0) {
-    for (const meal of WEEKLY_MEAL_PLAN) {
-      const createdMeal = await prisma.mealPlanTemplate.create({
-        data: {
-          monthYear: currentMonthYear,
-          dayOfWeek: meal.dayOfWeek,
-          mealType: meal.mealType,
-          scheduledTime: meal.scheduledTime,
-          title: meal.title,
-          description: meal.description,
-          isOptional: meal.isOptional ?? false,
-        },
+    if (monthPlansCount === 0) {
+      for (const meal of WEEKLY_MEAL_PLAN) {
+        const createdMeal = await tx.mealPlanTemplate.create({
+          data: {
+            userId,
+            monthYear: currentMonthYear,
+            dayOfWeek: meal.dayOfWeek,
+            mealType: meal.mealType,
+            scheduledTime: meal.scheduledTime,
+            title: meal.title,
+            description: meal.description,
+            isOptional: meal.isOptional ?? false,
+          },
+        });
+
+        for (const link of meal.items) {
+          const ingId = ingredientMap.get(link.ingredientName);
+          if (ingId) {
+            await tx.mealPlanIngredient.create({
+              data: {
+                mealPlanTemplateId: createdMeal.id,
+                ingredientId: ingId,
+                quantityNeeded: link.quantity,
+              },
+            });
+          }
+        }
+      }
+    }
+
+    // 4. Seed sample historical DailyLogs if user has no logs yet
+    const logsCount = await tx.dailyLog.count({ where: { userId } });
+    if (logsCount === 0) {
+      const templates = await tx.mealPlanTemplate.findMany({
+        where: { userId, monthYear: currentMonthYear },
       });
 
-      for (const link of meal.items) {
-        const ingId = ingredientMap.get(link.ingredientName);
-        if (ingId) {
-          await prisma.mealPlanIngredient.create({
+      for (let offset = 4; offset >= 1; offset--) {
+        const d = new Date(now);
+        d.setDate(now.getDate() - offset);
+        const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        const dow = d.getDay();
+        const dayTemplates = templates.filter((t) => t.dayOfWeek === dow);
+
+        for (let i = 0; i < dayTemplates.length; i++) {
+          const tpl = dayTemplates[i];
+          const isSubstituted = offset === 2 && tpl.mealType === "DINNER";
+          await tx.dailyLog.create({
             data: {
-              mealPlanTemplateId: createdMeal.id,
-              ingredientId: ingId,
-              quantityNeeded: link.quantity,
+              userId,
+              date: dateStr,
+              mealPlanTemplateId: tpl.id,
+              mealType: tpl.mealType,
+              status: isSubstituted ? "SUBSTITUTED" : "COMPLETED",
+              actualNotes: isSubstituted
+                ? "Substituído por Lasanha de Berinjela Fit (Guia de Receitas Base) mantendo proteínas."
+                : `Refeição realizada conforme plano (${tpl.title})`,
+              loggedAt: new Date(`${dateStr}T${tpl.scheduledTime}:00`),
+              latitude: -23.5505,
+              longitude: -46.6333,
+              locationName: "Casa • São Paulo, SP",
+              waterIntakeMl: i === 0 ? 2850 : 0,
+              fastingWaterDone: true,
             },
           });
         }
       }
     }
+  });
 
-    await recalculateIngredientNeeds(currentMonthYear);
-  }
-
-  // Seed sample historical DailyLogs for the current month if none exist so the dashboard calendar & report look alive out of the box
-  const logsCount = await prisma.dailyLog.count();
-  if (logsCount === 0) {
-    const templates = await prisma.mealPlanTemplate.findMany({
-      where: { monthYear: currentMonthYear },
-    });
-
-    // Populate last 5 days with realistic logs
-    for (let offset = 4; offset >= 1; offset--) {
-      const d = new Date(now);
-      d.setDate(now.getDate() - offset);
-      const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-      const dow = d.getDay();
-      const dayTemplates = templates.filter((t) => t.dayOfWeek === dow);
-
-      for (let i = 0; i < dayTemplates.length; i++) {
-        const tpl = dayTemplates[i];
-        const isSubstituted = offset === 2 && tpl.mealType === "DINNER";
-        await prisma.dailyLog.create({
-          data: {
-            date: dateStr,
-            mealPlanTemplateId: tpl.id,
-            mealType: tpl.mealType,
-            status: isSubstituted ? "SUBSTITUTED" : "COMPLETED",
-            actualNotes: isSubstituted
-              ? "Substituído por Lasanha de Berinjela Fit (Guia de Receitas Base) mantendo proteínas."
-              : `Refeição realizada conforme plano (${tpl.title})`,
-            loggedAt: new Date(`${dateStr}T${tpl.scheduledTime}:00`),
-            latitude: -23.5505,
-            longitude: -46.6333,
-            locationName: "Casa • São Paulo, SP",
-            waterIntakeMl: i === 0 ? 2850 : 0,
-            fastingWaterDone: true,
-          },
-        });
-      }
-    }
-  }
+  await recalculateIngredientNeeds(userId, currentMonthYear);
 }
+
+/**
+ * Ensures either a specific user's month plan is seeded, or if called without
+ * userId (e.g. CLI seed / initial boot), ensures the primary owner account exists and is seeded.
+ */
+export async function ensureSeeded(
+  targetMonthYear?: string,
+  forUserId?: string
+) {
+  await ensureWalMode();
+
+  if (forUserId) {
+    const user = await prisma.user.findUnique({ where: { id: forUserId } });
+    if (user) {
+      await provisionInitialUserData(
+        user.id,
+        user.name,
+        user.email,
+        targetMonthYear
+      );
+    }
+    return;
+  }
+
+  let primaryUser = await prisma.user.findFirst({
+    orderBy: { createdAt: "asc" },
+  });
+
+  if (!primaryUser) {
+    const defaultName = process.env.NEXT_PUBLIC_USER_NAME || "Demo User";
+    const defaultEmail = (
+      process.env.ALERT_RECIPIENT_EMAIL || "user@example.com"
+    ).toLowerCase();
+    const defaultPassword =
+      process.env.DEFAULT_OWNER_PASSWORD || "NutriTrack123!";
+
+    primaryUser = await prisma.user.create({
+      data: {
+        id: "owner-primary",
+        name: defaultName,
+        email: defaultEmail,
+        passwordHash: hashPassword(defaultPassword),
+      },
+    });
+  }
+
+  await provisionInitialUserData(
+    primaryUser.id,
+    primaryUser.name,
+    primaryUser.email,
+    targetMonthYear
+  );
+}
+

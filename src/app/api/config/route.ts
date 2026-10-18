@@ -1,8 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getAuthenticatedUser } from "@/lib/auth";
 
 export async function PUT(req: NextRequest) {
   try {
+    const currentUser = await getAuthenticatedUser(req);
+    if (!currentUser) {
+      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    }
+
     const body = await req.json();
     const {
       userName,
@@ -20,8 +26,15 @@ export async function PUT(req: NextRequest) {
       cronEnabled,
     } = body;
 
+    if (typeof userName === "string" && userName.trim() !== "") {
+      await prisma.user.update({
+        where: { id: currentUser.id },
+        data: { name: userName.trim() },
+      });
+    }
+
     const updated = await prisma.appConfig.upsert({
-      where: { id: "singleton" },
+      where: { userId: currentUser.id },
       update: {
         ...(userName !== undefined ? { userName } : {}),
         ...(nutritionistName !== undefined ? { nutritionistName } : {}),
@@ -32,16 +45,21 @@ export async function PUT(req: NextRequest) {
         ...(smtpPass !== undefined ? { smtpPass } : {}),
         ...(resendApiKey !== undefined ? { resendApiKey } : {}),
         ...(emailProvider !== undefined ? { emailProvider } : {}),
-        ...(dailyWaterGoalMl !== undefined ? { dailyWaterGoalMl: Number(dailyWaterGoalMl) || 3000 } : {}),
-        ...(fastingWaterMl !== undefined ? { fastingWaterMl: Number(fastingWaterMl) || 500 } : {}),
+        ...(dailyWaterGoalMl !== undefined
+          ? { dailyWaterGoalMl: Number(dailyWaterGoalMl) || 3000 }
+          : {}),
+        ...(fastingWaterMl !== undefined
+          ? { fastingWaterMl: Number(fastingWaterMl) || 500 }
+          : {}),
         ...(cronTime !== undefined ? { cronTime } : {}),
         ...(typeof cronEnabled === "boolean" ? { cronEnabled } : {}),
       },
       create: {
-        id: "singleton",
-        userName: userName || process.env.NEXT_PUBLIC_USER_NAME || "Demo User",
-        nutritionistName: nutritionistName || "Dra. Nutricionista",
-        targetEmail: targetEmail || process.env.ALERT_RECIPIENT_EMAIL || "user@example.com",
+        userId: currentUser.id,
+        userName: userName || currentUser.name,
+        nutritionistName:
+          nutritionistName || "Nutricionista Clínica & Esportiva",
+        targetEmail: targetEmail || currentUser.email,
         smtpHost: smtpHost || process.env.SMTP_HOST || "smtp.example.com",
         smtpPort: Number(smtpPort) || 587,
         smtpUser: smtpUser || "",
@@ -59,7 +77,10 @@ export async function PUT(req: NextRequest) {
   } catch (error: unknown) {
     console.error("PUT /api/config error:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to update config" },
+      {
+        error:
+          error instanceof Error ? error.message : "Failed to update config",
+      },
       { status: 500 }
     );
   }

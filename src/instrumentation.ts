@@ -7,12 +7,12 @@ export async function register() {
 
     try {
       await ensureSeeded();
-      console.log("[NutriTrack OS] SQLite WAL Mode & Initial Seed verified.");
+      console.log("[NutriTrack OS] SQLite WAL Mode & Initial Multi-User Seed verified.");
     } catch (err) {
       console.error("[NutriTrack OS] Startup seed check error:", err);
     }
 
-    // Schedule daily lookahead check every minute, matching configured HH:MM (default 18:00)
+    // Schedule daily lookahead check every minute, iterating over all registered users (SPEC-06)
     cron.default.schedule("* * * * *", async () => {
       try {
         const now = new Date();
@@ -20,14 +20,19 @@ export async function register() {
         const mm = String(now.getMinutes()).padStart(2, "0");
         const currentHHMM = `${hh}:${mm}`;
 
-        const config = await prisma.appConfig.findUnique({
-          where: { id: "singleton" },
+        const users = await prisma.user.findMany({
+          include: { appConfig: true },
         });
 
-        const targetTime = config?.cronTime || "18:00";
-        if (config?.cronEnabled !== false && currentHHMM === targetTime) {
-          console.log(`[NutriTrack OS Cron] Firing 18:00 Lookahead Alert Check...`);
-          await runLookaheadCheck();
+        for (const user of users) {
+          const config = user.appConfig;
+          const targetTime = config?.cronTime || "18:00";
+          if (config?.cronEnabled !== false && currentHHMM === targetTime) {
+            console.log(
+              `[NutriTrack OS Cron] Firing ${targetTime} Lookahead Alert Check for user ${user.email}...`
+            );
+            await runLookaheadCheck(user.id);
+          }
         }
       } catch (e) {
         console.error("[NutriTrack OS Cron] Error:", e);

@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getAuthenticatedUser } from "@/lib/auth";
 import { recalculateIngredientNeeds } from "@/lib/seed-data";
 
 export async function PUT(req: NextRequest) {
   try {
+    const currentUser = await getAuthenticatedUser(req);
+    if (!currentUser) {
+      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    }
+
     const body = await req.json();
     const {
       id,
@@ -18,11 +24,24 @@ export async function PUT(req: NextRequest) {
     } = body;
 
     if (!id) {
-      return NextResponse.json({ error: "Missing mealPlanTemplate id" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Missing mealPlanTemplate id" },
+        { status: 400 }
+      );
+    }
+
+    const existing = await prisma.mealPlanTemplate.findFirst({
+      where: { id, userId: currentUser.id },
+    });
+    if (!existing) {
+      return NextResponse.json(
+        { error: "Meal template not found" },
+        { status: 404 }
+      );
     }
 
     const updated = await prisma.mealPlanTemplate.update({
-      where: { id },
+      where: { id: existing.id },
       data: {
         ...(scheduledTime ? { scheduledTime } : {}),
         ...(title ? { title } : {}),
@@ -35,29 +54,43 @@ export async function PUT(req: NextRequest) {
 
     if (Array.isArray(ingredients)) {
       await prisma.mealPlanIngredient.deleteMany({
-        where: { mealPlanTemplateId: id },
+        where: { mealPlanTemplateId: existing.id },
       });
 
       for (const item of ingredients) {
         if (item.ingredientId && Number(item.quantityNeeded) > 0) {
-          await prisma.mealPlanIngredient.create({
-            data: {
-              mealPlanTemplateId: id,
-              ingredientId: item.ingredientId,
-              quantityNeeded: Number(item.quantityNeeded),
-            },
+          // Verify ingredient belongs to current user
+          const userIng = await prisma.ingredient.findFirst({
+            where: { id: item.ingredientId, userId: currentUser.id },
           });
+          if (userIng) {
+            await prisma.mealPlanIngredient.create({
+              data: {
+                mealPlanTemplateId: existing.id,
+                ingredientId: userIng.id,
+                quantityNeeded: Number(item.quantityNeeded),
+              },
+            });
+          }
         }
       }
     }
 
-    await recalculateIngredientNeeds(monthYear || updated.monthYear);
+    await recalculateIngredientNeeds(
+      currentUser.id,
+      monthYear || updated.monthYear
+    );
 
     return NextResponse.json({ mealTemplate: updated });
   } catch (error: unknown) {
     console.error("PUT /api/meals error:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to update meal template" },
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to update meal template",
+      },
       { status: 500 }
     );
   }
@@ -65,6 +98,11 @@ export async function PUT(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const currentUser = await getAuthenticatedUser(req);
+    if (!currentUser) {
+      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    }
+
     const body = await req.json();
     const {
       monthYear,
@@ -79,6 +117,7 @@ export async function POST(req: NextRequest) {
 
     const created = await prisma.mealPlanTemplate.create({
       data: {
+        userId: currentUser.id,
         monthYear,
         dayOfWeek: Number(dayOfWeek),
         mealType,
@@ -92,23 +131,33 @@ export async function POST(req: NextRequest) {
     if (Array.isArray(ingredients)) {
       for (const item of ingredients) {
         if (item.ingredientId && Number(item.quantityNeeded) > 0) {
-          await prisma.mealPlanIngredient.create({
-            data: {
-              mealPlanTemplateId: created.id,
-              ingredientId: item.ingredientId,
-              quantityNeeded: Number(item.quantityNeeded),
-            },
+          const userIng = await prisma.ingredient.findFirst({
+            where: { id: item.ingredientId, userId: currentUser.id },
           });
+          if (userIng) {
+            await prisma.mealPlanIngredient.create({
+              data: {
+                mealPlanTemplateId: created.id,
+                ingredientId: userIng.id,
+                quantityNeeded: Number(item.quantityNeeded),
+              },
+            });
+          }
         }
       }
     }
 
-    await recalculateIngredientNeeds(monthYear);
+    await recalculateIngredientNeeds(currentUser.id, monthYear);
 
     return NextResponse.json({ mealTemplate: created });
   } catch (error: unknown) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to create meal template" },
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to create meal template",
+      },
       { status: 500 }
     );
   }

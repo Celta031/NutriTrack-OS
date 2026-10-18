@@ -26,6 +26,12 @@ import {
   Share2,
   Search,
   Filter,
+  LogOut,
+  User as UserIcon,
+  Lock,
+  Mail,
+  UserPlus,
+  LogIn,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -263,6 +269,20 @@ export default function NutriTrackApp() {
   const [loading, setLoading] = useState<boolean>(true);
   const [toast, setToast] = useState<string | null>(null);
 
+  // Multi-user Authentication State (SDD-002 / SPEC-07)
+  const [currentUser, setCurrentUser] = useState<{
+    id: string;
+    name: string;
+    email: string;
+  } | null>(null);
+  const [authChecked, setAuthChecked] = useState<boolean>(false);
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [authName, setAuthName] = useState<string>("");
+  const [authEmail, setAuthEmail] = useState<string>("");
+  const [authPassword, setAuthPassword] = useState<string>("");
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authSubmitting, setAuthSubmitting] = useState<boolean>(false);
+
   // App state from API
   const [ingredients, setIngredients] = useState<IngredientItem[]>([]);
   const [mealTemplates, setMealTemplates] = useState<MealPlanTemplateItem[]>([]);
@@ -333,7 +353,15 @@ export default function NutriTrackApp() {
         const res = await fetch(`/api/state?date=${d}&monthYear=${m}`, {
           cache: "no-store",
         });
+        if (res.status === 401) {
+          setCurrentUser(null);
+          setAuthChecked(true);
+          setLoading(false);
+          return;
+        }
         const data = await res.json();
+        if (data.user) setCurrentUser(data.user);
+        setAuthChecked(true);
         if (data.ingredients) setIngredients(data.ingredients);
         if (data.mealTemplates) setMealTemplates(data.mealTemplates);
         if (data.monthLogs) setMonthLogs(data.monthLogs);
@@ -343,6 +371,7 @@ export default function NutriTrackApp() {
         if (data.tomorrowSummary) setTomorrowSummary(data.tomorrowSummary);
       } catch (e) {
         console.error("Failed to fetch state:", e);
+        setAuthChecked(true);
       } finally {
         setLoading(false);
       }
@@ -353,6 +382,60 @@ export default function NutriTrackApp() {
   useEffect(() => {
     fetchState();
   }, [fetchState]);
+
+  const handleAuthSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    setAuthSubmitting(true);
+    try {
+      const endpoint =
+        authMode === "register" ? "/api/auth/register" : "/api/auth/login";
+      const payload =
+        authMode === "register"
+          ? { name: authName, email: authEmail, password: authPassword }
+          : { email: authEmail, password: authPassword };
+
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAuthError(data.error || "Falha na autenticação.");
+        return;
+      }
+      setCurrentUser(data.user);
+      setAuthPassword("");
+      setLoading(true);
+      await fetchState();
+      showToast(
+        authMode === "register"
+          ? `Conta criada com sucesso! Bem-vindo(a), ${data.user.name}!`
+          : `Bem-vindo(a) de volta, ${data.user.name}!`
+      );
+    } catch {
+      setAuthError("Erro de conexão ao autenticar.");
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+      setCurrentUser(null);
+      setIngredients([]);
+      setMealTemplates([]);
+      setMonthLogs([]);
+      setConfig(null);
+      setNotificationLogs([]);
+      setTomorrowSummary(null);
+      showToast("Sessão encerrada com segurança.");
+    } catch {
+      showToast("Erro ao encerrar sessão.");
+    }
+  };
 
   // Logs for selectedDate
   const selectedDateLogs = useMemo(
@@ -798,6 +881,165 @@ export default function NutriTrackApp() {
   const waterGoal = config?.dailyWaterGoalMl || 3000;
   const waterPct = Math.min(100, Math.round((currentWaterMl / waterGoal) * 100));
 
+  if (authChecked && !currentUser) {
+    return (
+      <div className="min-h-screen flex flex-col justify-center items-center bg-gradient-to-br from-emerald-950 via-emerald-900 to-slate-900 px-4 py-10">
+        {toast && (
+          <div className="fixed bottom-5 right-5 z-50 bg-emerald-950 text-white px-4 py-3 rounded-xl shadow-2xl border border-emerald-500/40 flex items-center gap-2 text-xs font-semibold">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{toast}</span>
+          </div>
+        )}
+
+        <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl border border-emerald-800/20 overflow-hidden">
+          {/* Brand Header */}
+          <div className="bg-emerald-950 text-white px-6 py-6 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-emerald-500 text-emerald-950 flex items-center justify-center mx-auto mb-3 shadow-inner">
+              <Utensils className="w-6 h-6" />
+            </div>
+            <h1 className="text-xl font-extrabold tracking-tight">
+              NutriTrack OS
+            </h1>
+            <p className="text-xs text-emerald-300 mt-1">
+              Gestão Inteligente de Dieta, Estoque Vivo & Alertas Preventivos
+            </p>
+          </div>
+
+          {/* Auth Mode Switcher Tabs */}
+          <div className="grid grid-cols-2 bg-slate-100 p-1.5 m-5 mb-2 rounded-2xl border border-slate-200">
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode("login");
+                setAuthError(null);
+              }}
+              className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                authMode === "login"
+                  ? "bg-white text-emerald-950 shadow-sm"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              <LogIn className="w-4 h-4" />
+              Entrar (Login)
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode("register");
+                setAuthError(null);
+              }}
+              className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                authMode === "register"
+                  ? "bg-white text-emerald-950 shadow-sm"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              <UserPlus className="w-4 h-4" />
+              Criar Conta
+            </button>
+          </div>
+
+          <form onSubmit={handleAuthSubmit} className="px-6 pb-6 pt-2 space-y-4">
+            {authMode === "register" && (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs text-emerald-900">
+                <strong className="block font-bold mb-0.5">
+                  ✨ Auto-Onboarding Instantâneo:
+                </strong>
+                Sua conta já nasce configurada com 39 ingredientes de estoque
+                vivo, 42 refeições semanais editáveis e receitas fit isoladas
+                para você.
+              </div>
+            )}
+
+            {authError && (
+              <div className="bg-rose-50 border border-rose-200 text-rose-700 rounded-xl px-3.5 py-2.5 text-xs font-semibold flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>{authError}</span>
+              </div>
+            )}
+
+            {authMode === "register" && (
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Seu Nome Completo
+                </label>
+                <div className="relative">
+                  <UserIcon className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    required
+                    value={authName}
+                    onChange={(e) => setAuthName(e.target.value)}
+                    placeholder="Ex: Maria Silva"
+                    className="w-full pl-10 pr-3.5 py-2.5 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                E-mail
+              </label>
+              <div className="relative">
+                <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="email"
+                  required
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
+                  placeholder="seu@email.com"
+                  className="w-full pl-10 pr-3.5 py-2.5 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Senha {authMode === "register" && "(mínimo 6 caracteres)"}
+              </label>
+              <div className="relative">
+                <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="password"
+                  required
+                  minLength={6}
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full pl-10 pr-3.5 py-2.5 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={authSubmitting}
+              className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-bold shadow-md transition-all flex items-center justify-center gap-2"
+            >
+              {authSubmitting ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  Processando...
+                </>
+              ) : authMode === "register" ? (
+                <>
+                  <UserPlus className="w-4 h-4" />
+                  Criar Minha Conta & Gerar Cardápio
+                </>
+              ) : (
+                <>
+                  <LogIn className="w-4 h-4" />
+                  Acessar Meu Painel NutriTrack
+                </>
+              )}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 pb-20 md:pb-8">
       {/* Top Navigation Header */}
@@ -808,21 +1050,27 @@ export default function NutriTrackApp() {
               <Utensils className="w-6 h-6" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="font-bold text-lg tracking-tight">
                   NutriTrack OS
                 </h1>
-                <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-800 text-emerald-200 font-medium border border-emerald-700">
-                  {config?.userName || process.env.NEXT_PUBLIC_USER_NAME || "User"} • v1.0
+                <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-800 text-emerald-100 font-semibold border border-emerald-700 flex items-center gap-1">
+                  <UserIcon className="w-3 h-3 text-emerald-300" />
+                  {config?.userName ||
+                    currentUser?.name ||
+                    process.env.NEXT_PUBLIC_USER_NAME ||
+                    "User"}
                 </span>
               </div>
               <p className="text-xs text-emerald-300">
-                Gestão Inteligente de Dieta, Estoque Vivo (39 itens) & Alertas
+                {currentUser?.email
+                  ? `${currentUser.email} • Estoque & Dieta Isolados`
+                  : "Gestão Inteligente de Dieta, Estoque Vivo (39 itens) & Alertas"}
               </p>
             </div>
           </div>
 
-          {/* Date & Month Selectors */}
+          {/* Date, Tomorrow Alert & Logout Button */}
           <div className="flex items-center gap-2 text-sm">
             <div className="flex items-center bg-emerald-900/80 border border-emerald-700/80 rounded-lg px-2.5 py-1.5">
               <CalendarIcon className="w-4 h-4 text-emerald-300 mr-2" />
@@ -851,6 +1099,17 @@ export default function NutriTrackApp() {
               >
                 <AlertTriangle className="w-4 h-4" />
                 {tomorrowSummary.missingItems.length} Falta(m) p/ Amanhã!
+              </button>
+            )}
+
+            {currentUser && (
+              <button
+                onClick={handleLogout}
+                title={`Sair da conta (${currentUser.email})`}
+                className="inline-flex items-center gap-1.5 bg-emerald-900/90 hover:bg-rose-700 border border-emerald-700 hover:border-rose-500 text-emerald-100 hover:text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Sair</span>
               </button>
             )}
           </div>
@@ -2236,7 +2495,7 @@ export default function NutriTrackApp() {
                       Relatório Executivo de Acompanhamento Clínico & Nutricional
                     </span>
                     <h2 className="text-2xl font-extrabold text-slate-900 mt-1">
-                      Paciente: {config?.userName || process.env.NEXT_PUBLIC_USER_NAME || "Demo User"} • Referência:{" "}
+                      Paciente: {config?.userName || currentUser?.name || process.env.NEXT_PUBLIC_USER_NAME || "Demo User"} • Referência:{" "}
                       {selectedMonthYear}
                     </h2>
                     <p className="text-xs text-slate-500 mt-0.5">

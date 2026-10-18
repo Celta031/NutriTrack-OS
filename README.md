@@ -34,6 +34,9 @@ O **NutriTrack-OS** é uma plataforma web full-stack, *Mobile-First* e *PWA-read
    - Agendador interno (`node-cron` via Next.js Instrumentation Hook) que cruza diariamente às `18:00` as refeições de amanhã (`D+1`) com itens fora de estoque (`!inStock && !boughtForWeek`), enviando alerta HTML via **SMTP** ou **Resend API** (além de botão de disparo e preview imediato na interface).
 5. **Relatório Executivo para Nutricionista:**
    - Consolidação de KPIs mensais (% de adesão, média de hidratação, histórico de substituições justificadas e galeria de fotos auditadas com data/hora/GPS), estilizada com `@media print` para exportação direta em PDF (`window.print()`).
+6. **Autenticação Multi-Usuário & Isolamento Completo (`SDD-002`):**
+   - Login e Cadastro instantâneo com sessão **JWT Stateless (`jose` + Cookie `HttpOnly`)** e hash de senha nativo (`crypto.scrypt`).
+   - **Auto-Onboarding:** Cada nova conta criada recebe automaticamente seu próprio catálogo de 39 ingredientes e 42 refeições semanais em uma transação isolada por `userId`.
 
 ---
 
@@ -47,11 +50,12 @@ O sistema foi engenheirado para operar com folga em instâncias Cloud IaaS *Free
 - **Caddy Server Reverse Proxy (`~13 MiB RAM`):** Provisionamento e renovação automática de certificados TLS/HTTPS Let's Encrypt.
 
 📚 **Documentação Técnica SDD Completa:**
-- [**Software Design Document (`docs/SDD.md`)**](docs/SDD.md) — Especificação completa de arquitetura, diagramas Mermaid, modelo de dados (ERD), regras de negócio (`SPEC-01` a `SPEC-03`) e contratos de API.
+- [**Software Design Document (`docs/SDD.md`)**](docs/SDD.md) — Especificação completa de arquitetura, diagramas Mermaid, modelo de dados multi-tenant (ERD), regras de negócio (`SPEC-01` a `SPEC-07`) e contratos de API.
 - **Architecture Decision Records (`docs/ADR/`):**
   - [ADR-001: SQLite WAL Mode vs. SGBD Gerenciado](docs/ADR/001-sqlite-wal-over-managed-db.md)
   - [ADR-002: Next.js Standalone & Caddy Auto-HTTPS](docs/ADR/002-nextjs-standalone-and-caddy.md)
   - [ADR-003: Compressão Client-Side WebP $\le 400\text{ KB}$](docs/ADR/003-client-side-webp-compression.md)
+  - [ADR-004: Sessão JWT Stateless (`jose`) & Isolamento Multi-Tenant (`userId`)](docs/ADR/004-stateless-jwt-multi-tenant-isolation.md)
 
 ---
 

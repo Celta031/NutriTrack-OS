@@ -43,7 +43,10 @@ const MEAL_TYPE_LABELS: Record<string, string> = {
   SUPPER: "Ceia",
 };
 
-export async function computeTomorrowMissing(referenceDate?: Date) {
+export async function computeTomorrowMissing(
+  userId: string,
+  referenceDate?: Date
+) {
   const base = referenceDate ? new Date(referenceDate) : new Date();
   const tomorrow = new Date(base);
   tomorrow.setDate(base.getDate() + 1);
@@ -57,10 +60,11 @@ export async function computeTomorrowMissing(referenceDate?: Date) {
   const tomorrowDayOfWeek = tomorrow.getDay();
   const tomorrowDayName = DAY_NAMES[tomorrowDayOfWeek];
 
-  await ensureSeeded(monthYear);
+  await ensureSeeded(monthYear, userId);
 
   const tomorrowTemplates = await prisma.mealPlanTemplate.findMany({
     where: {
+      userId,
       monthYear,
       dayOfWeek: tomorrowDayOfWeek,
     },
@@ -113,28 +117,34 @@ export async function computeTomorrowMissing(referenceDate?: Date) {
   };
 }
 
-export async function runLookaheadCheck(options?: {
-  referenceDate?: Date;
-  forceSendEvenIfComplete?: boolean;
-}): Promise<LookaheadResult> {
+export async function runLookaheadCheck(
+  userId: string,
+  options?: {
+    referenceDate?: Date;
+    forceSendEvenIfComplete?: boolean;
+  }
+): Promise<LookaheadResult> {
   const {
     tomorrowDate,
     tomorrowDayOfWeek,
     tomorrowDayName,
     tomorrowTemplates,
     missingItems,
-  } = await computeTomorrowMissing(options?.referenceDate);
+  } = await computeTomorrowMissing(userId, options?.referenceDate);
 
-  const config = await prisma.appConfig.findUnique({
-    where: { id: "singleton" },
-  });
+  const [user, config] = await Promise.all([
+    prisma.user.findUnique({ where: { id: userId } }),
+    prisma.appConfig.findUnique({ where: { userId } }),
+  ]);
 
   const recipient =
     config?.targetEmail ||
+    user?.email ||
     process.env.ALERT_RECIPIENT_EMAIL ||
     "user@example.com";
   const userName =
     config?.userName ||
+    user?.name ||
     process.env.NEXT_PUBLIC_USER_NAME ||
     "Demo User";
 
@@ -263,6 +273,7 @@ export async function runLookaheadCheck(options?: {
 
   const log = await prisma.notificationLog.create({
     data: {
+      userId,
       targetDate: tomorrowDate,
       recipient,
       subject,

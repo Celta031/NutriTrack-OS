@@ -7,9 +7,25 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model User {
+  id            String             @id @default(cuid())
+  name          String
+  email         String             @unique
+  passwordHash  String
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  ingredients   Ingredient[]
+  mealTemplates MealPlanTemplate[]
+  dailyLogs     DailyLog[]
+  notifications NotificationLog[]
+  appConfig     AppConfig?
+}
+
 model Ingredient {
   id                String               @id @default(cuid())
-  name              String               @unique
+  userId            String
+  name              String
   category          String               // Proteínas, Laticínios, Mercearia, Frutas, Legumes/Verduras
   unit              String               // g, ml, un, maço, etc.
   purchaseFrequency String               // MONTHLY, BIWEEKLY, WEEKLY, DAILY
@@ -19,11 +35,15 @@ model Ingredient {
   boughtForWeek     Boolean              @default(false) // Comprado pra Semana
   notes             String?
   updatedAt         DateTime             @updatedAt
+  user              User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   mealIngredients   MealPlanIngredient[]
+
+  @@unique([userId, name])
 }
 
 model MealPlanTemplate {
   id            String               @id @default(cuid())
+  userId        String
   monthYear     String               // ex: "2026-10"
   dayOfWeek     Int                  // 0=Dom a 6=Sáb
   mealType      String               // BREAKFAST, MORNING_SNACK, LUNCH, AFTERNOON_SNACK, DINNER, SUPPER
@@ -31,10 +51,11 @@ model MealPlanTemplate {
   title         String
   description   String
   isOptional    Boolean              @default(false)
+  user          User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   ingredients   MealPlanIngredient[]
   dailyLogs     DailyLog[]
 
-  @@index([monthYear, dayOfWeek])
+  @@index([userId, monthYear, dayOfWeek])
 }
 
 model MealPlanIngredient {
@@ -50,6 +71,7 @@ model MealPlanIngredient {
 
 model DailyLog {
   id                 String            @id @default(cuid())
+  userId             String
   date               String            // YYYY-MM-DD
   mealPlanTemplateId String?
   mealType           String?           // Fallback / quick reference
@@ -62,13 +84,15 @@ model DailyLog {
   locationName       String?
   waterIntakeMl      Int               @default(0)
   fastingWaterDone   Boolean           @default(false)
+  user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   mealPlanTemplate   MealPlanTemplate? @relation(fields: [mealPlanTemplateId], references: [id], onDelete: SetNull)
 
-  @@index([date])
+  @@index([userId, date])
 }
 
 model NotificationLog {
   id           String   @id @default(cuid())
+  userId       String
   sentAt       DateTime @default(now())
   targetDate   String   // YYYY-MM-DD (data do dia seguinte verificada)
   recipient    String
@@ -77,10 +101,14 @@ model NotificationLog {
   missingItems String   // JSON array of missing items
   status       String   // SENT, SIMULATED, FAILED
   errorMessage String?
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, targetDate])
 }
 
 model AppConfig {
-  id               String   @id @default("singleton")
+  id               String   @id @default(cuid())
+  userId           String   @unique
   userName         String   @default("Demo User")
   nutritionistName String   @default("Dra. Nutricionista")
   targetEmail      String   @default("user@example.com")
@@ -95,4 +123,5 @@ model AppConfig {
   cronTime         String   @default("18:00")
   cronEnabled      Boolean  @default(true)
   updatedAt        DateTime @updatedAt
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

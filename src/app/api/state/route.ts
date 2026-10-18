@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getAuthenticatedUser } from "@/lib/auth";
 import { ensureSeeded } from "@/lib/seed-data";
 import { computeTomorrowMissing } from "@/lib/lookahead-alert";
 import { BASE_RECIPES } from "@/lib/recipes";
@@ -8,21 +9,36 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
+    await ensureSeeded();
+
+    const currentUser = await getAuthenticatedUser(req);
+    if (!currentUser) {
+      return NextResponse.json(
+        { error: "Não autenticado. Faça login para acessar seus dados." },
+        { status: 401 }
+      );
+    }
+
     const { searchParams } = new URL(req.url);
     const now = new Date();
     const defaultDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     const dateParam = searchParams.get("date") || defaultDate;
-    const monthYearParam = searchParams.get("monthYear") || dateParam.slice(0, 7);
+    const monthYearParam =
+      searchParams.get("monthYear") || dateParam.slice(0, 7);
 
-    await ensureSeeded(monthYearParam);
+    await ensureSeeded(monthYearParam, currentUser.id);
 
     const [ingredients, mealTemplates, monthLogs, config, notificationLogs] =
       await Promise.all([
         prisma.ingredient.findMany({
+          where: { userId: currentUser.id },
           orderBy: [{ category: "asc" }, { name: "asc" }],
         }),
         prisma.mealPlanTemplate.findMany({
-          where: { monthYear: monthYearParam },
+          where: {
+            userId: currentUser.id,
+            monthYear: monthYearParam,
+          },
           include: {
             ingredients: {
               include: { ingredient: true },
@@ -32,6 +48,7 @@ export async function GET(req: NextRequest) {
         }),
         prisma.dailyLog.findMany({
           where: {
+            userId: currentUser.id,
             date: {
               startsWith: monthYearParam,
             },
@@ -42,18 +59,21 @@ export async function GET(req: NextRequest) {
           orderBy: { loggedAt: "desc" },
         }),
         prisma.appConfig.findUnique({
-          where: { id: "singleton" },
+          where: { userId: currentUser.id },
         }),
         prisma.notificationLog.findMany({
+          where: { userId: currentUser.id },
           orderBy: { sentAt: "desc" },
           take: 15,
         }),
       ]);
 
     const referenceDate = new Date(`${dateParam}T12:00:00`);
-    const tomorrowSummary = await computeTomorrowMissing(referenceDate);
+    const tomorrowSummary = await computeTomorrowMissing(
+      currentUser.id,
+      referenceDate
+    );
 
-    // Map tomorrow's requirements across ALL ingredients (even stocked ones) so the UI knows which ingredients are used tomorrow
     const tomorrowUsageMap = new Map<
       string,
       { quantity: number; meals: string[] }
@@ -87,6 +107,7 @@ export async function GET(req: NextRequest) {
     });
 
     return NextResponse.json({
+      user: currentUser,
       date: dateParam,
       monthYear: monthYearParam,
       ingredients: enrichedIngredients,

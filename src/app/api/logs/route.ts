@@ -1,15 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getAuthenticatedUser } from "@/lib/auth";
 
 export async function POST(req: NextRequest) {
   try {
+    const currentUser = await getAuthenticatedUser(req);
+    if (!currentUser) {
+      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    }
+
     const body = await req.json();
 
     // Action 1: Update hydration (water intake & fasting water goal) for a date
     if (body.action === "HYDRATION") {
       const { date, waterIntakeMl, fastingWaterDone } = body;
       const existingLogs = await prisma.dailyLog.findMany({
-        where: { date },
+        where: { userId: currentUser.id, date },
         orderBy: { loggedAt: "asc" },
       });
 
@@ -19,17 +25,21 @@ export async function POST(req: NextRequest) {
           where: { id: first.id },
           data: {
             ...(typeof waterIntakeMl === "number" ? { waterIntakeMl } : {}),
-            ...(typeof fastingWaterDone === "boolean" ? { fastingWaterDone } : {}),
+            ...(typeof fastingWaterDone === "boolean"
+              ? { fastingWaterDone }
+              : {}),
           },
         });
         return NextResponse.json({ log: updated });
       } else {
         const created = await prisma.dailyLog.create({
           data: {
+            userId: currentUser.id,
             date,
             status: "PENDING",
             actualNotes: "Controle diário de hidratação iniciado",
-            waterIntakeMl: typeof waterIntakeMl === "number" ? waterIntakeMl : 0,
+            waterIntakeMl:
+              typeof waterIntakeMl === "number" ? waterIntakeMl : 0,
             fastingWaterDone: Boolean(fastingWaterDone),
           },
         });
@@ -60,6 +70,7 @@ export async function POST(req: NextRequest) {
 
     const existing = await prisma.dailyLog.findFirst({
       where: {
+        userId: currentUser.id,
         date,
         mealPlanTemplateId,
       },
@@ -70,11 +81,13 @@ export async function POST(req: NextRequest) {
         where: { id: existing.id },
         data: {
           status: status || existing.status,
-          actualNotes: typeof actualNotes === "string" ? actualNotes : existing.actualNotes,
+          actualNotes:
+            typeof actualNotes === "string" ? actualNotes : existing.actualNotes,
           photoUrl: photoUrl !== undefined ? photoUrl : existing.photoUrl,
           latitude: latitude !== undefined ? latitude : existing.latitude,
           longitude: longitude !== undefined ? longitude : existing.longitude,
-          locationName: locationName !== undefined ? locationName : existing.locationName,
+          locationName:
+            locationName !== undefined ? locationName : existing.locationName,
           loggedAt: loggedAt ? new Date(loggedAt) : new Date(),
         },
       });
@@ -82,6 +95,7 @@ export async function POST(req: NextRequest) {
     } else {
       const created = await prisma.dailyLog.create({
         data: {
+          userId: currentUser.id,
           date,
           mealPlanTemplateId,
           mealType: mealType || "MEAL",
